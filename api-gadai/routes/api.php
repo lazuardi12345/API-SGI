@@ -90,7 +90,7 @@ Route::middleware(['auth:sanctum', 'role:petugas'])->group(function () {
     Route::post('petugas/gadai/ulang/check-nasabah', [GadaiUlangController::class, 'checkNasabah']);
     Route::post('petugas/gadai/ulang-emas', [GadaiUlangEmasController::class, 'store']);
     Route::post('petugas/gadai/ulang-emas/check-nasabah', [GadaiUlangEmasController::class, 'checkNasabah']);
-     Route::patch('petugas/perpanjangan-tempo/{id}/bayar', [PerpanjanganTempoController::class, 'bayarPerpanjangan']);
+    Route::patch('petugas/perpanjangan-tempo/{id}/bayar', [PerpanjanganTempoController::class, 'bayarPerpanjangan']);
 
 });
 
@@ -158,6 +158,8 @@ Route::middleware(['auth:sanctum', 'role:hm'])->group(function () {
     Route::get('dashboard/pelelangan-stats', [DashboardGadaiController::class, 'pelelanganStats']);
     Route::get('dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
     Route::get('harian/cetak', [LaporanHarianCheckerController::class, 'cetakLaporanHarian']);
+    Route::get('harian/cetak-serah-terima', [LaporanHarianCheckerController::class, 'cetakLaporanSerahTerima']);
+    Route::get('/cetak-perpanjangan', [LaporanHarianCheckerController::class, 'cetakLaporanPerpanjangan']);
 
 
     Route::get('pelelangan/history', [PelelanganController::class, 'history']);
@@ -179,11 +181,11 @@ Route::middleware(['auth:sanctum', 'role:hm'])->group(function () {
     Route::post('/gadai/ulang-emas', [GadaiUlangEmasController::class, 'store']);
     Route::post('/gadai/ulang-emas/check-nasabah', [GadaiUlangEmasController::class, 'checkNasabah']);
 
-Route::get('brankas', [BrankasController::class, 'index']);
-Route::get('brankas/riwayat', [BrankasController::class, 'riwayat']);
-Route::post('brankas/transaksi', [BrankasController::class, 'store']);
-Route::patch('brankas/validasi/{id}', [BrankasController::class, 'validasiSetoran']);
-Route::get('dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('brankas', [BrankasController::class, 'index']);
+    Route::get('brankas/riwayat', [BrankasController::class, 'riwayat']);
+    Route::post('brankas/transaksi', [BrankasController::class, 'store']);
+    Route::patch('brankas/validasi/{id}', [BrankasController::class, 'validasiSetoran']);
+    Route::get('dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
 
 });
 
@@ -256,12 +258,14 @@ Route::middleware(['auth:sanctum', 'role:checker'])->group(function () {
 
     Route::post('checker/gadai/ulang-emas', [GadaiUlangEmasController::class, 'store']);
     Route::post('checker/gadai/ulang-emas/check-nasabah', [GadaiUlangEmasController::class, 'checkNasabah']);
-Route::get('checker/brankas', [BrankasController::class, 'index']);
-Route::get('checker/brankas/riwayat', [BrankasController::class, 'riwayat']);
-Route::post('checker/brankas/transaksi', [BrankasController::class, 'store']);
-Route::get('checker/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
-Route::get('checker/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
-Route::get('checker/harian/cetak', [LaporanHarianCheckerController::class, 'cetakLaporanHarian']);
+    Route::get('checker/brankas', [BrankasController::class, 'index']);
+    Route::get('checker/brankas/riwayat', [BrankasController::class, 'riwayat']);
+    Route::post('checker/brankas/transaksi', [BrankasController::class, 'store']);
+    Route::get('checker/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
+    Route::get('checker/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('checker/harian/cetak', [LaporanHarianCheckerController::class, 'cetakLaporanHarian']);
+    Route::get('checker/harian/cetak-serah-terima', [LaporanHarianCheckerController::class, 'cetakLaporanSerahTerima']);
+    Route::get('checker/cetak-perpanjangan', [LaporanHarianCheckerController::class, 'cetakLaporanPerpanjangan']);
 
 
 });
@@ -287,12 +291,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('admin/pelelangan', [PelelanganController::class, 'index']);
     Route::get('admin/pelelangan/history', [PelelanganController::class, 'history']);
     Route::get('admin/pelelangan/{detail_gadai_id}', [PelelanganController::class, 'show']);
-Route::get('admin/brankas', [BrankasController::class, 'index']);
-Route::get('admin/brankas/riwayat', [BrankasController::class, 'riwayat']);
-Route::post('admin/brankas/transaksi', [BrankasController::class, 'store']);
-Route::patch('admin/brankas/validasi/{id}', [BrankasController::class, 'validasiSetoran']);
-Route::get('admin/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
-Route::get('admin/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('admin/brankas', [BrankasController::class, 'index']);
+    Route::get('admin/brankas/riwayat', [BrankasController::class, 'riwayat']);
+    Route::post('admin/brankas/transaksi', [BrankasController::class, 'store']);
+    Route::patch('admin/brankas/validasi/{id}', [BrankasController::class, 'validasiSetoran']);
+    Route::get('admin/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
+    Route::get('admin/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
 
 
 });

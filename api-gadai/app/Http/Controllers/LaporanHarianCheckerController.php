@@ -162,4 +162,148 @@ class LaporanHarianCheckerController extends Controller
             ], 500);
         }
     }
+
+public function cetakLaporanSerahTerima(Request $request)
+{
+    try {
+        $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
+
+        // Ambil semua detail gadai yang lunas pada tanggal tersebut dengan SEMUA relasi barang
+        $dataLunas = \App\Models\DetailGadai::with([
+                'nasabah', 
+                'hp.merk', 'hp.type_hp', 'hp.kelengkapanList',
+                'perhiasan', 
+                'logamMulia', 
+                'retro'
+            ])
+            ->where('status', 'lunas')
+            ->whereDate('tanggal_bayar', $tanggal)
+            ->get();
+
+        $formattedData = $dataLunas->map(function ($gadai) {
+            $namaBarang = '-';
+            $detailSpesifik = '-';
+            $kelengkapan = [];
+
+            // 1. Cek jika Gadai HP
+            if ($gadai->hp) {
+                $hp = $gadai->hp;
+                $namaBarang = ($hp->nama_barang ?? 'HP') . " " . ($hp->merk->nama_merk ?? '') . " " . ($hp->type_hp->nama_type ?? '');
+                $detailSpesifik = "IMEI: {$hp->imei} | Warna: {$hp->warna} | PW: {$hp->kunci_password}";
+                $kelengkapan = $hp->kelengkapanList->pluck('nama_kelengkapan')->toArray();
+            } 
+            // 2. Cek jika Perhiasan
+            elseif ($gadai->perhiasan) {
+                $p = $gadai->perhiasan;
+                $namaBarang = "Perhiasan: " . ($p->nama_barang ?? 'Emas');
+                $detailSpesifik = "Berat: {$p->berat} gr | Kadar: {$p->kadar}% | Warna: {$p->warna}";
+            }
+            // 3. Cek jika Logam Mulia
+            elseif ($gadai->logamMulia) {
+                $lm = $gadai->logamMulia;
+                $namaBarang = "Logam Mulia: " . ($lm->nama_barang ?? 'LM');
+                $detailSpesifik = "Berat: {$lm->berat} gr | Brand: {$lm->brand}";
+            }
+            // 4. Cek jika Retro
+            elseif ($gadai->retro) {
+                $r = $gadai->retro;
+                $namaBarang = "Barang Retro: " . ($r->nama_barang ?? 'Retro');
+                $detailSpesifik = "Keterangan: {$r->keterangan}";
+            }
+
+            return [
+                'no_gadai' => $gadai->no_gadai,
+                'nasabah' => $gadai->nasabah->nama_lengkap ?? 'Nasabah Tidak Ditemukan',
+                'nama_barang' => $namaBarang,
+                'detail_spesifik' => $detailSpesifik,
+                'kelengkapan' => $kelengkapan,
+                'nominal_lunas' => (float)$gadai->nominal_bayar,
+                'tanggal_bayar' => $gadai->tanggal_bayar ? Carbon::parse($gadai->tanggal_bayar)->format('d-m-Y') : '-',
+            ];
+        });
+
+        // Hitung Grand Total Pelunasan
+        $totalNominal = $formattedData->sum('nominal_lunas');
+
+        return response()->json([
+            'success' => true,
+            'metadata' => [
+                'total_item' => $formattedData->count(),
+                'grand_total_lunas' => $totalNominal,
+                'tanggal_laporan' => $tanggal
+            ],
+            'data' => $formattedData
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal memuat detail serah terima: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+public function cetakLaporanPerpanjangan(Request $request)
+{
+    try {
+        $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
+
+        // Ambil data perpanjangan yang SUDAH LUNAS bayar di tanggal tersebut
+        $dataPerpanjangan = \App\Models\PerpanjanganTempo::with([
+                'detailGadai.nasabah',
+                'detailGadai.hp.merk',
+                'detailGadai.hp.type_hp',
+                'detailGadai.perhiasan',
+                'detailGadai.logamMulia',
+                'detailGadai.retro'
+            ])
+            ->where('status_bayar', 'lunas')
+            ->whereDate('updated_at', $tanggal) // atau tgl bayar jika ada fieldnya
+            ->get();
+
+        $formattedPerpanjangan = $dataPerpanjangan->map(function ($p) {
+            $gadai = $p->detailGadai;
+            $namaBarang = '-';
+            $detailBarang = '-';
+
+            // Logic deteksi barang sama seperti cetak lunas
+            if ($gadai->hp) {
+                $namaBarang = "HP: " . ($gadai->hp->merk->nama_merk ?? '') . " " . ($gadai->hp->type_hp->nama_type ?? '');
+                $detailBarang = "IMEI: " . ($gadai->hp->imei ?? '-');
+            } elseif ($gadai->perhiasan) {
+                $namaBarang = "Perhiasan: " . ($gadai->perhiasan->nama_barang ?? 'Emas');
+                $detailBarang = "Berat: {$gadai->perhiasan->berat} gr | Kadar: {$gadai->perhiasan->kadar}%";
+            } elseif ($gadai->logamMulia) {
+                $namaBarang = "LM: " . ($gadai->logamMulia->nama_barang ?? 'Logam Mulia');
+                $detailBarang = "Brand: {$gadai->logamMulia->brand} | Berat: {$gadai->logamMulia->berat} gr";
+            } elseif ($gadai->retro) {
+                $namaBarang = "Retro: " . ($gadai->retro->nama_barang ?? 'Barang');
+                $detailBarang = "Ket: " . ($gadai->retro->keterangan ?? '-');
+            }
+
+            return [
+                'no_gadai' => $gadai->no_gadai,
+                'nasabah' => $gadai->nasabah->nama_lengkap ?? '-',
+                'barang' => $namaBarang,
+                'detail' => $detailBarang,
+                'jt_lama' => Carbon::parse($p->detailGadai->jatuh_tempo)->format('d/m/Y'), // JT sebelum diupdate
+                'jt_baru' => Carbon::parse($p->jatuh_tempo_baru)->format('d/m/Y'),
+                'nominal_pembayaran' => (float)$p->nominal_admin, // Ini total jasa+denda+admin dari store tadi
+                'metode' => strtoupper($p->metode_pembayaran)
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'metadata' => [
+                'total_dana_masuk' => $formattedPerpanjangan->sum('nominal_pembayaran'),
+                'jumlah_transaksi' => $formattedPerpanjangan->count()
+            ],
+            'data' => $formattedPerpanjangan
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+    }
+}
 }
