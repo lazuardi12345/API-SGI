@@ -201,6 +201,9 @@ Route::middleware(['auth:sanctum', 'role:hm'])->group(function () {
     Route::post('manager/approve-sbg/{id}', [DetailGadaiController::class, 'approveSBG']);
     Route::get('manager/gadai/list-sbg', [DetailGadaiController::class, 'getListSBGForManager']);
     Route::get('/manager/acc-history', [DetailGadaiController::class, 'getAccHistory']);
+    Route::get('/laporan/struk-awal-mingguan', [AdminLaporanMingguanController::class, 'strukAwalMingguan']);
+    Route::get('/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
+    Route::get('/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
 
 });
 
@@ -316,6 +319,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('admin/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
     Route::get('admin/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
     Route::get('admin/laporan-mingguan', [AdminLaporanMingguanController::class, 'cetakLaporanMingguan']);
+    Route::get('admin/laporan/struk-awal-mingguan', [AdminLaporanMingguanController::class, 'strukAwalMingguan']);
+    Route::get('admin/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
+    Route::get('admin/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
 
 
 });
