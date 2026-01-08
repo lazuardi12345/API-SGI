@@ -20,6 +20,8 @@ class TransaksiBrankas extends Model
         'saldo_awal',
         'pemasukan',
         'pengeluaran',
+        'saldo_awal_rekening',
+        'saldo_akhir_rekening',
         'saldo_akhir',
         'bukti_transaksi', 
         'status_validasi', 

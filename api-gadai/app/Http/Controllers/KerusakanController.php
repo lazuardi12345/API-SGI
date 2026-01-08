@@ -8,9 +8,6 @@ use Illuminate\Support\Facades\Validator;
 
 class KerusakanController extends Controller
 {
-    /**
-     * LIST DATA KERUSAKAN (PAKE PAGINATION)
-     */
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -36,14 +33,12 @@ class KerusakanController extends Controller
         ]);
     }
 
-    /**
-     * SIMPAN DATA BARU
-     */
+
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'nama_kerusakan' => 'required|string|unique:kerusakan,nama_kerusakan',
-            'persen'         => 'required|numeric|min:0|max:100', // Validasi persen
+            'persen'         => 'required|numeric|min:0|max:100', 
         ]);
 
         if ($validator->fails()) {
@@ -66,9 +61,6 @@ class KerusakanController extends Controller
         ]);
     }
 
-    /**
-     * UPDATE DATA KERUSAKAN
-     */
     public function update(Request $request, $id)
     {
         $kerusakan = Kerusakan::find($id);
@@ -92,7 +84,6 @@ class KerusakanController extends Controller
             ], 422);
         }
 
-        // Update hanya field nama_kerusakan dan persen
         $kerusakan->update($request->only(['nama_kerusakan', 'persen']));
 
         return response()->json([
@@ -102,9 +93,7 @@ class KerusakanController extends Controller
         ]);
     }
 
-    /**
-     * HAPUS DATA
-     */
+
     public function destroy($id)
     {
         $kerusakan = Kerusakan::find($id);

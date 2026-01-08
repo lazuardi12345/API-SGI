@@ -8,9 +8,7 @@ use Illuminate\Support\Facades\Validator;
 
 class KelengkapanController extends Controller
 {
-    /**
-     * LIST DATA KELENGKAPAN (PAKE PAGINATION)
-     */
+
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -36,13 +34,10 @@ class KelengkapanController extends Controller
         ]);
     }
 
-    /**
-     * SIMPAN DATA BARU
-     */
+
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            // Hanya validasi nama_kelengkapan
             'nama_kelengkapan' => 'required|string|unique:kelengkapan,nama_kelengkapan',
         ]);
 
@@ -65,9 +60,7 @@ class KelengkapanController extends Controller
         ]);
     }
 
-    /**
-     * UPDATE DATA
-     */
+
     public function update(Request $request, $id)
     {
         $kelengkapan = Kelengkapan::find($id);
@@ -90,7 +83,6 @@ class KelengkapanController extends Controller
             ], 422);
         }
 
-        // Hanya update nama_kelengkapan
         $kelengkapan->update($request->only(['nama_kelengkapan']));
 
         return response()->json([
@@ -100,9 +92,6 @@ class KelengkapanController extends Controller
         ]);
     }
 
-    /**
-     * HAPUS DATA
-     */
     public function destroy($id)
     {
         $kelengkapan = Kelengkapan::find($id);

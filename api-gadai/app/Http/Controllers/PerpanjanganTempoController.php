@@ -11,12 +11,9 @@ use Illuminate\Support\Facades\Validator;
 
 class PerpanjanganTempoController extends Controller
 {
-    /**
-     * List semua perpanjangan dengan Tabulasi Filter
-     */
     public function index(Request $request)
     {
-        $status = $request->get('status'); // 'pending' atau 'lunas'
+        $status = $request->get('status'); 
         $search = $request->get('search');
 
         $query = PerpanjanganTempo::with(['detailGadai.nasabah', 'detailGadai.type'])
@@ -41,69 +38,67 @@ class PerpanjanganTempoController extends Controller
         ]);
     }
 
-    /**
-     * Simpan pengajuan (Nominal Admin dihitung di FE/dikirim saat pengajuan)
-     */
+
 public function store(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'detail_gadai_id'      => 'required|exists:detail_gadai,id',
-            'tanggal_perpanjangan' => 'required|date',
-            'jatuh_tempo_baru'     => 'required|date|after:tanggal_perpanjangan',
-        ]);
+{
+    $validator = Validator::make($request->all(), [
+        'detail_gadai_id'      => 'required|exists:detail_gadai,id',
+        'tanggal_perpanjangan' => 'required|date',
+        'jatuh_tempo_baru'     => 'required|date|after:tanggal_perpanjangan',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-        }
-
-        $gadai = DetailGadai::with('type')->findOrFail($request->detail_gadai_id);
-        
-        // 1. Ambil Data Dasar
-        $pokok = (float) $gadai->uang_pinjaman;
-        $typeNama = strtolower($gadai->type->nama_type ?? '');
-        $tglExtend = Carbon::parse($request->tanggal_perpanjangan);
-        $jtLama = Carbon::parse($gadai->jatuh_tempo); 
-        $jtBaru = Carbon::parse($request->jatuh_tempo_baru);
-
-        $totalTelat = max(0, $jtLama->diffInDays($tglExtend, false));
-        $periodeBaruHari = max(0, $tglExtend->diffInDays($jtBaru, false));
-
-        // 2. KALKULASI JASA BARU (HP 4.5%, Emas 2%)
-        $jasa = 0;
-        if (in_array($typeNama, ['handphone', 'hp', 'elektronik'])) {
-            $jasa = $pokok * 0.045; 
-        } else {
-            $jasa = $pokok * 0.02; // Standar Emas 2%
-        }
-
-        // 3. KALKULASI DENDA & PENALTY
-        $rateDenda = in_array($typeNama, ['handphone', 'hp', 'elektronik']) ? 0.003 : 0.001;
-        $denda = $pokok * $rateDenda * $totalTelat;
-        $penalty = ($totalTelat > 15) ? 180000 : 0;
-
-        // 4. KALKULASI ADMIN MINIMAL
-        $adminBase = $pokok * 0.01;
-        $adminMin = in_array($typeNama, ['handphone', 'hp', 'elektronik']) ? 5000 : 10000;
-        $adminFinal = max($adminBase, $adminMin);
-
-        // 5. TOTAL GABUNGAN (Semua masuk ke nominal_admin)
-        // Pembulatan ke atas per 1000 agar nominal cantik
-        $totalSemua = ceil(($jasa + $denda + $penalty + $adminFinal) / 1000) * 1000;
-
-        $perpanjangan = PerpanjanganTempo::create([
-            'detail_gadai_id'      => $request->detail_gadai_id,
-            'tanggal_perpanjangan' => $request->tanggal_perpanjangan,
-            'jatuh_tempo_baru'     => $request->jatuh_tempo_baru,
-            'nominal_admin'        => $totalSemua, // Gabungan semua biaya
-            'status_bayar'         => 'pending',
-        ]);
-
-        return response()->json(['success' => true, 'data' => $perpanjangan], 201);
+    if ($validator->fails()) {
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
     }
 
-    /**
-     * Validasi Pembayaran & Update Jatuh Tempo Utama
-     */
+    $gadai = DetailGadai::with('type')->findOrFail($request->detail_gadai_id);
+
+    $pokok = (float) $gadai->uang_pinjaman;
+    $typeNama = strtolower($gadai->type->nama_type ?? '');
+    
+    $tglExtend = Carbon::parse($request->tanggal_perpanjangan);
+    $jtLama = Carbon::parse($gadai->jatuh_tempo); 
+    $jtBaru = Carbon::parse($request->jatuh_tempo_baru);
+
+    // Hitung selisih hari telat dan periode tenor baru
+    $totalTelat = max(0, $jtLama->diffInDays($tglExtend, false));
+    $periodeBaruHari = max(0, $tglExtend->diffInDays($jtBaru, false));
+
+    $isHandphoneElektronik = in_array($typeNama, ['handphone', 'hp', 'elektronik']);
+
+    // 1. Kalkulasi Jasa (Sesuai Tenor 15/30 hari)
+    $jasa = 0;
+    if ($isHandphoneElektronik) {
+        $rateJasa = ($periodeBaruHari <= 15) ? 0.045 : 0.095;
+        $jasa = $pokok * $rateJasa;
+    } else {
+        $rateJasa = ($periodeBaruHari <= 15) ? 0.015 : 0.025;
+        $jasa = $pokok * $rateJasa;
+    }
+
+    $rateDenda = 0.001; 
+    $denda = $pokok * $rateDenda * $totalTelat;
+
+    $penalty = ($totalTelat > 15) ? 180000 : 0;
+
+    $adminFinal = 0;
+    if (!$isHandphoneElektronik) {
+        $adminBase = $pokok * 0.01; 
+        $adminMin = 10000;
+        $adminFinal = max($adminBase, $adminMin);
+    }
+    $totalSemua = ceil(($jasa + $denda + $penalty + $adminFinal) / 1000) * 1000;
+
+    $perpanjangan = PerpanjanganTempo::create([
+        'detail_gadai_id'      => $request->detail_gadai_id,
+        'tanggal_perpanjangan' => $request->tanggal_perpanjangan,
+        'jatuh_tempo_baru'     => $request->jatuh_tempo_baru,
+        'nominal_admin'        => $totalSemua, 
+        'status_bayar'         => 'pending',
+    ]);
+
+    return response()->json(['success' => true, 'data' => $perpanjangan], 201);
+}
 public function bayarPerpanjangan(Request $request, $id)
     {
         $perpanjangan = PerpanjanganTempo::with(['detailGadai.nasabah', 'detailGadai.type'])->findOrFail($id);
@@ -124,8 +119,6 @@ public function bayarPerpanjangan(Request $request, $id)
             $gadai = $perpanjangan->detailGadai;
             $nasabah = $gadai->nasabah;
             $typeNama = strtolower($gadai->type->nama_type ?? 'umum');
-
-            // Proses Upload Bukti
             $path = $perpanjangan->bukti_transfer;
             if ($request->hasFile('bukti_transfer')) {
                 $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
@@ -134,15 +127,11 @@ public function bayarPerpanjangan(Request $request, $id)
                 $filename = "bukti-transfer-" . ($nasabah->nik ?? '000000') . "-" . time() . '.' . $file->getClientOriginalExtension();
                 $path = $file->storeAs($folderBase, $filename, 'minio');
             }
-
-            // Update status perpanjangan (Nominal tidak diubah karena sudah fix saat store)
             $perpanjangan->update([
                 'status_bayar'      => 'lunas',
                 'metode_pembayaran' => $request->metode_pembayaran,
                 'bukti_transfer'    => $path,
             ]);
-
-            // Update Jatuh Tempo di tabel utama
             $gadai->update(['jatuh_tempo' => $perpanjangan->jatuh_tempo_baru]);
 
             DB::commit();

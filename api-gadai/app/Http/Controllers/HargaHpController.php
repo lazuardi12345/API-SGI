@@ -16,9 +16,6 @@ class HargaHpController extends Controller
         $this->gradeCalculator = $gradeCalculator;
     }
 
-    /**
-     * List semua harga HP dengan pagination
-     */
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -33,9 +30,6 @@ class HargaHpController extends Controller
         ]);
     }
 
-    /**
-     * Tambah harga HP baru dengan auto-generate grade & taksiran
-     */
     public function store(Request $request)
     {
         $request->validate([
@@ -62,14 +56,10 @@ class HargaHpController extends Controller
 
         if ($autoGenerate) {
             $pasarTrend = $request->input('pasar_trend', 'turun');
-            
-            // Mengambil hasil kalkulasi lengkap (Grade + Taksiran)
             $calculatedData = $this->gradeCalculator->calculateAllGrades(
                 $request->harga_barang,
                 $pasarTrend
             );
-
-            // Simpan ke database menggunakan array_merge untuk menyertakan semua kolom
             $grade = GradeHp::create(array_merge(
                 ['harga_hp_id' => $harga->id],
                 $calculatedData
@@ -87,10 +77,6 @@ class HargaHpController extends Controller
             ]
         ], 201);
     }
-
-    /**
-     * Update harga HP dan recalculate grade & taksiran
-     */
     public function update(Request $request, $id)
     {
         $harga = HargaHp::findOrFail($id);
@@ -112,8 +98,6 @@ class HargaHpController extends Controller
 
             if ($grade) {
                 $pasarTrend = $request->input('pasar_trend', 'turun');
-                
-                // Recalculate menghasilkan data lengkap Grade + Taksiran baru
                 $calculatedData = $this->gradeCalculator->calculateAllGrades(
                     $request->harga_barang,
                     $pasarTrend
@@ -131,14 +115,9 @@ class HargaHpController extends Controller
         ]);
     }
 
-    /**
-     * Hapus harga HP beserta grade & taksiran terkait
-     */
     public function destroy($id)
     {
         $harga = HargaHp::findOrFail($id);
-        
-        // Cascade delete manual (atau pastikan migration sudah cascadeOnDelete)
         GradeHp::where('harga_hp_id', $id)->delete();
         $harga->delete();
 
@@ -155,40 +134,39 @@ class HargaHpController extends Controller
     }
 
     public function getByType($typeHpId)
-{
-    // Menggunakan first() agar return-nya satu object, bukan array
-    $harga = HargaHp::with(['typeHp.merk', 'grades'])
-        ->where('type_hp_id', $typeHpId)
-        ->first();
+    {
+        $harga = HargaHp::with(['typeHp.merk', 'grades'])
+            ->where('type_hp_id', $typeHpId)
+            ->first();
 
-    if (!$harga) {
-        return response()->json([
-            'success' => false, 
-            'message' => 'Data harga untuk tipe ini belum di-set di Master Harga',
-            'data' => null
-        ]);
+        if (!$harga) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Data harga untuk tipe ini belum di-set di Master Harga',
+                'data' => null
+            ]);
+        }
+
+        return response()->json(['success' => true, 'data' => $harga]);
     }
 
-    return response()->json(['success' => true, 'data' => $harga]);
-}
+    public function getGradeByType($typeHpId)
+    {
+        $harga = HargaHp::with(['typeHp.merk', 'grades'])
+            ->where('type_hp_id', $typeHpId)
+            ->first();
 
-public function getGradeByType($typeHpId)
-{
-    $harga = HargaHp::with(['typeHp.merk', 'grades'])
-        ->where('type_hp_id', $typeHpId)
-        ->first();
+        if (!$harga || !$harga->grades) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Grade belum dibuat untuk type ini',
+                'data' => null
+            ]);
+        }
 
-    if (!$harga || !$harga->grades) {
         return response()->json([
-            'success' => false,
-            'message' => 'Grade belum dibuat untuk type ini',
-            'data' => null
+            'success' => true,
+            'data' => $harga->grades
         ]);
     }
-
-    return response()->json([
-        'success' => true,
-        'data' => $harga->grades
-    ]);
-}
 }

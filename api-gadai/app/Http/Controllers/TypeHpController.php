@@ -7,9 +7,6 @@ use Illuminate\Http\Request;
 
 class TypeHpController extends Controller
 {
-    /**
-     * Tampilkan semua type HP dengan relasi merk
-     */
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -24,9 +21,6 @@ class TypeHpController extends Controller
         return response()->json($query->paginate($perPage));
     }
 
-    /**
-     * Dapatkan semua type berdasarkan merk HP
-     */
 public function getByMerk($merkId)
 {
     $types = TypeHp::with(['hargaTerbaru']) 
@@ -51,9 +45,6 @@ public function getByMerk($merkId)
 }
 
 
-    /**
-     * Simpan type HP baru
-     */
     public function store(Request $request)
     {
         $request->validate([
@@ -70,9 +61,7 @@ public function getByMerk($merkId)
         ]);
     }
 
-    /**
-     * Update type HP
-     */
+
     public function update(Request $request, $id)
     {
         $type = TypeHp::findOrFail($id);
@@ -91,9 +80,7 @@ public function getByMerk($merkId)
         ]);
     }
 
-    /**
-     * Hapus type HP
-     */
+
     public function destroy($id)
     {
         $type = TypeHp::findOrFail($id);

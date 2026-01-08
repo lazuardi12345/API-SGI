@@ -9,12 +9,11 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB; 
 use Carbon\Carbon;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class DetailGadaiController extends Controller
 {
-    /**
-     * 🔹 Ambil semua data detail gadai dengan pagination
-     */
+
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -60,9 +59,7 @@ class DetailGadaiController extends Controller
         ]);
     }
 
-    /**
-     * 🔹 Simpan data detail gadai baru
-     */
+
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -103,9 +100,7 @@ class DetailGadaiController extends Controller
         return response()->json(['success' => true, 'data' => $gadai], 201);
     }
 
-    /**
-     * 🔹 Validasi Selesai Cek (Proses -> Selesai)
-     */
+
     public function validasiSelesai(Request $request, $id)
     {
         $gadai = DetailGadai::find($id);
@@ -180,24 +175,88 @@ class DetailGadaiController extends Controller
         }
     }
 
-    /**
-     * 🔹 Tampilkan data detail gadai berdasarkan ID
-     */
-    public function show($id)
-    {
-        $gadai = DetailGadai::with([
-            'type', 'nasabah.user', 'perpanjanganTempos', 'hp', 'hp.merk', 'hp.type_hp',
-            'perhiasan', 'logamMulia', 'retro'
-        ])->find($id);
 
-        if (!$gadai) return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
+public function show($id)
+{
+    // Eager loading relasi sesuai dengan nama fungsi di masing-masing Model yang kamu kirim
+    $gadai = DetailGadai::with([
+        'type', 
+        'nasabah.user', 
+        'hp.merk', 
+        'hp.type_hp', 
+        'hp.kerusakanList', 
+        'hp.kelengkapanList',
+        'hp.dokumenPendukungHp',         // Sesuai Model GadaiHp (hasOne)
+        'perhiasan.kelengkapan',   
+        'perhiasan.dokumenPendukung',     // Sesuai Model GadaiPerhiasan (hasOne)
+        'logamMulia.kelengkapanEmas', 
+        'logamMulia.dokumenPendukung',    // Sesuai Model GadaiLogamMulia (hasOne)
+        'retro.kelengkapan', 
+        'retro.dokumenPendukung',         // Sesuai Model GadaiRetro (hasOne)
+        'approvals.user' 
+    ])->find($id);
 
-        return response()->json(['success' => true, 'data' => $gadai]);
+    if (!$gadai) {
+        return response()->json([
+            'success' => false, 
+            'message' => 'Data tidak ditemukan.'
+        ], 404);
     }
 
-    /**
-     * 🔹 Hapus data
-     */
+    // Logika Approval & QR Code
+    $isApproved = ($gadai->approval_status === 'approved');
+    $qrCodeBase64 = null;
+
+    if ($isApproved) {
+        $verifyUrl = url("/api/v1/verify-sbg/" . $gadai->no_gadai);
+        $qrCodeRaw = \QrCode::format('png')
+            ->size(200)
+            ->margin(1)
+            ->errorCorrection('H')
+            ->generate($verifyUrl);
+        $qrCodeBase64 = 'data:image/png;base64,' . base64_encode($qrCodeRaw);
+    }
+
+    // Ubah data model ke Array
+    $dataResponse = $gadai->toArray();
+    
+    // --- MAPPING DOKUMEN PENDUKUNG AGAR STRUKTURNYA RAPI UNTUK UI ---
+    
+    // 1. Mapping Dokumen HP
+    // Kita ambil dari hp -> dokumenPendukungHp sesuai model yang kamu kasih
+    if ($gadai->hp && $gadai->hp->dokumenPendukungHp) {
+        $dataResponse['dokumen_pendukung_hp'] = $gadai->hp->dokumenPendukungHp;
+    }
+
+    // 2. Mapping Dokumen Emas (Perhiasan, Logam Mulia, atau Retro)
+    // Ketiganya menggunakan nama fungsi "dokumenPendukung" di modelnya
+    $dokumenEmas = null;
+    if ($gadai->perhiasan && $gadai->perhiasan->dokumenPendukung) {
+        $dokumenEmas = $gadai->perhiasan->dokumenPendukung;
+    } elseif ($gadai->logamMulia && $gadai->logamMulia->dokumenPendukung) {
+        $dokumenEmas = $gadai->logamMulia->dokumenPendukung;
+    } elseif ($gadai->retro && $gadai->retro->dokumenPendukung) {
+        $dokumenEmas = $gadai->retro->dokumenPendukung;
+    }
+
+    if ($dokumenEmas) {
+        $dataResponse['dokumen_pendukung_emas'] = $dokumenEmas;
+    }
+
+    // Tambahkan metadata untuk kebutuhan cetak dan UI
+    $dataResponse['is_approved'] = $isApproved; 
+    $dataResponse['metadata'] = [
+        'qr_code'     => $qrCodeBase64,
+        'checker_name'=> $isApproved ? ($gadai->approvals->where('role', 'checker')->first()->user->name ?? 'Checker SGI') : null,
+        'acc_at'      => $isApproved ? $gadai->updated_at->format('d-m-Y H:i') : null,
+    ];
+
+    return response()->json([
+        'success' => true, 
+        'data' => $dataResponse
+    ]);
+}
+
     public function destroy($id)
     {
         $gadai = DetailGadai::find($id);
@@ -206,10 +265,6 @@ class DetailGadaiController extends Controller
         return response()->json(['success' => true, 'message' => 'Data berhasil dihapus.']);
     }
 
-
-    /**
-     * 🔹 Update data detail gadai
-     */
     public function update(Request $request, $id)
     {
         $gadai = DetailGadai::find($id);
@@ -221,7 +276,6 @@ class DetailGadaiController extends Controller
             ], 404);
         }
 
-        // 1. Validasi Input
         $validator = Validator::make($request->all(), [
             'tanggal_gadai' => 'sometimes|required|date',
             'jatuh_tempo'   => 'sometimes|required|date|after_or_equal:tanggal_gadai',
@@ -246,16 +300,10 @@ class DetailGadaiController extends Controller
                 'nasabah_id', 'taksiran', 'uang_pinjaman', 'status'
             ]);
 
-            // 2. Logika jika No Gadai harus berubah (Opsional)
-            // Jika tanggal_gadai atau type_id berubah, nomor gadai biasanya harus regenerasi
             if ($request->has('tanggal_gadai') || $request->has('type_id')) {
                 $tanggal = Carbon::parse($request->get('tanggal_gadai', $gadai->tanggal_gadai));
                 $type = Type::find($request->get('type_id', $gadai->type_id));
-                
-                // Mengambil 4 digit terakhir dari no_nasabah yang sudah ada
                 $suffix = substr($gadai->no_nasabah, -4); 
-                
-                // Update No Gadai & No Nasabah sesuai format store
                 $dataUpdate['no_nasabah'] = $tanggal->format('m') . $tanggal->format('y') . $suffix;
                 $dataUpdate['no_gadai'] = "SGI-{$tanggal->format('d')}-{$tanggal->format('m')}-{$tanggal->format('Y')}-{$type->nomor_type}-{$suffix}";
             }
@@ -278,4 +326,188 @@ class DetailGadaiController extends Controller
             ], 500);
         }
     }
+
+
+public function approveSBG(Request $request, $id)
+{
+    try {
+        $gadai = DetailGadai::findOrFail($id);
+        
+        if ($gadai->approval_status !== 'pending') {
+            return response()->json([
+                'success' => false, 
+                'message' => 'SBG belum diajukan atau sudah diproses sebelumnya.'
+            ], 400);
+        }
+        
+        $gadai->update([
+            'approval_status' => 'approved'
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Surat Bukti Gadai [{$gadai->no_gadai}] Berhasil di-ACC."
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false, 
+            'message' => "Terjadi kesalahan: " . $e->getMessage()
+        ], 500);
+    }
+}
+
+public function ajukanSBG(Request $request, $id)
+{
+    $gadai = DetailGadai::findOrFail($id);
+    
+    // Perbaikan: Izinkan status 'proses' ATAU 'selesai'
+    $allowedStatuses = ['proses', 'selesai'];
+
+    if (!in_array($gadai->status, $allowedStatuses)) {
+        return response()->json([
+            'success' => false, 
+            'message' => 'Status gadai harus "proses" atau "selesai" untuk diajukan.'
+        ], 400);
+    }
+
+    $gadai->update(['approval_status' => 'pending']);
+
+    return response()->json([
+        'success' => true,
+        'message' => "SBG {$gadai->no_gadai} berhasil diajukan untuk approval."
+    ]);
+}
+
+public function getListSBGForManager(Request $request)
+{
+    $status = $request->get('status', 'pending');
+
+    $query = DetailGadai::with(['nasabah', 'hp', 'type'])
+        ->orderBy('updated_at', 'desc');
+
+    if ($status === 'history') {
+        $query->where('approval_status', 'approved');
+    } else {
+        $query->where('approval_status', 'pending');
+    }
+
+    $data = $query->get();
+    return response()->json(['success' => true, 'data' => $data]);
+}
+
+public function getAccHistory(Request $request)
+{
+    try {
+        $query = DetailGadai::with([
+            'nasabah:id,nama_lengkap', 
+            'type:id,nama_type',
+            'hp', 'perhiasan', 'logamMulia', 'retro',
+            'approvals.user:id,name'
+        ])
+        ->where('approval_status', 'approved');
+
+        if ($request->has('tanggal') && !empty($request->tanggal)) {
+            $query->whereDate('updated_at', $request->tanggal);
+        }
+
+        $history = $query->orderBy('updated_at', 'desc')->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'History ACC berhasil diambil.',
+            'data' => $history
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal mengambil history: ' . $e->getMessage()
+        ], 500);
+    }
+}
+public function publicVerifySBG(Request $request, $no_gadai)
+{
+    // Load nasabah dan user-nya untuk cari info manager jika approvals kosong
+    $gadai = DetailGadai::with(['nasabah', 'type', 'hp', 'approvals.user'])
+        ->where('no_gadai', $no_gadai)
+        ->first();
+
+    if (!$gadai || $gadai->approval_status !== 'approved') {
+        return "
+        <div style='text-align:center; margin-top:50px; font-family:sans-serif; padding: 20px;'>
+            <div style='font-size: 80px;'>❌</div>
+            <h1 style='color:#c62828;'>DOKUMEN TIDAK VALID</h1>
+            <p style='color:#555;'>Maaf, Surat Bukti Gadai dengan nomor <b>$no_gadai</b> tidak ditemukan dalam database resmi kami atau belum mendapatkan persetujuan digital.</p>
+            <a href='#' onclick='window.close()' style='display:inline-block; margin-top:20px; padding:10px 20px; background:#1a237e; color:white; text-decoration:none; border-radius:5px;'>Tutup Halaman</a>
+        </div>";
+    }
+
+    $nasabah  = $gadai->nasabah->nama_lengkap ?? '-';
+    $barang   = $gadai->hp ? $gadai->hp->nama_barang : ($gadai->type->nama_type ?? 'Barang Jaminan');
+    
+    // Ambil nama manager dari record approval pertama, jika tidak ada pakai default
+    $manager  = $gadai->approvals->first()->user->name ?? "Manager Operasional SGI"; 
+    
+    $waktuAcc = $gadai->updated_at->translatedFormat('d F Y H:i');
+    $pinjaman = "Rp " . number_format($gadai->uang_pinjaman, 0, ',', '.');
+
+    return "
+    <html>
+    <head>
+        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        <title>VERIFIKASI SBG | SGI</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f7; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+            .card { background: white; border-radius: 15px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); max-width: 400px; width: 90%; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); color: white; padding: 30px 20px; text-align: center; }
+            .status-badge { background: #4caf50; color: white; padding: 6px 16px; border-radius: 50px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; display: inline-block; }
+            .content { padding: 25px; }
+            .info-group { margin-bottom: 18px; border-bottom: 1px solid #f0f0f0; padding-bottom: 10px; }
+            .info-group:last-child { border: none; }
+            .label { color: #90a4ae; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; }
+            .value { color: #2c3e50; font-weight: 700; font-size: 15px; margin-top: 4px; }
+            .footer { background: #f8f9fa; padding: 15px; text-align: center; font-size: 11px; color: #7f8c8d; border-top: 1px solid #eee; }
+            .highlight { color: #1a237e; }
+        </style>
+    </head>
+    <body>
+        <div class='card'>
+            <div class='header'>
+                <div style='font-size: 45px; margin-bottom: 10px;'>✅</div>
+                <h2 style='margin:0; font-size: 18px;'>SBG TERVERIFIKASI</h2>
+                <div class='status-badge'>Original Document</div>
+            </div>
+            <div class='content'>
+                <div class='info-group'>
+                    <div class='label'>Nomor Surat Gadai</div>
+                    <div class='value highlight'>$no_gadai</div>
+                </div>
+                <div class='info-group'>
+                    <div class='label'>Nama Nasabah</div>
+                    <div class='value'>$nasabah</div>
+                </div>
+                <div class='info-group'>
+                    <div class='label'>Barang Jaminan</div>
+                    <div class='value'>$barang</div>
+                </div>
+                <div class='info-group'>
+                    <div class='label'>Nilai Pinjaman</div>
+                    <div class='value' style='color: #d32f2f;'>$pinjaman</div>
+                </div>
+                <div class='info-group'>
+                    <div class='label'>Disetujui Digital Oleh</div>
+                    <div class='value'>$manager</div>
+                </div>
+                <div class='info-group'>
+                    <div class='label'>Waktu Persetujuan</div>
+                    <div class='value'>$waktuAcc WIB</div>
+                </div>
+            </div>
+            <div class='footer'>
+                <strong>PT SENTRA GADAI INDONESIA</strong><br>
+                Dokumen ini dihasilkan secara otomatis oleh sistem dan sah secara hukum sebagai bukti transaksi.
+            </div>
+        </div>
+    </body>
+    </html>";
+}
 }

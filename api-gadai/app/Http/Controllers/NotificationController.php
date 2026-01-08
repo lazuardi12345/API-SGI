@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Auth;
 
 class NotificationController extends Controller
 {
-    // Untuk header: cek notifikasi baru yang belum dibaca
     public function getNew(Request $request)
     {
         $user = Auth::user();
@@ -30,7 +29,7 @@ class NotificationController extends Controller
                 return response()->json(['success' => false, 'message' => 'Role tidak memiliki notifikasi'], 403);
         }
 
-        $approvals = $query->where('is_read', 0) // hanya yang belum dibaca
+        $approvals = $query->where('is_read', 0) 
                            ->orderBy('created_at', 'desc')
                            ->get();
 
@@ -45,8 +44,6 @@ class NotificationController extends Controller
 
         return response()->json(['success' => true, 'message' => 'Notifikasi baru', 'data' => $data]);
     }
-
-    // Semua notifikasi untuk halaman riwayat
     public function getAll(Request $request)
     {
         $user = Auth::user();
@@ -82,8 +79,6 @@ class NotificationController extends Controller
 
         return response()->json(['success' => true, 'message' => 'Riwayat notifikasi', 'data' => $data]);
     }
-
-    // Tandai notifikasi sebagai sudah dibaca
     public function markAsRead(Request $request)
     {
         $request->validate([

@@ -20,6 +20,12 @@ return new class extends Migration
             $table->decimal(column: 'taksiran', total: 15, places: 2);
             $table->decimal(column: 'uang_pinjaman', total: 15, places: 2);
             $table->enum('status', ['proses', 'selesai', 'lunas'])->default('proses');
+            
+            // 🔹 FIELD BARU: Approval SBG Online
+            $table->enum('approval_status', ['draft', 'pending', 'approved', 'rejected'])
+                  ->default('draft')
+                  ->comment('Status approval SBG untuk ACC online');
+            
             $table->unsignedBigInteger(column: 'type_id');
             $table->unsignedBigInteger(column: 'nasabah_id');
             $table->decimal('nominal_bayar', 15, 2)->nullable(); 

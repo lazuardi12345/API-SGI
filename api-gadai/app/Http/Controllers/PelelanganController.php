@@ -11,19 +11,15 @@ use Illuminate\Support\Facades\DB;
 
 class PelelanganController extends Controller
 {
-    /**
-     * Daftar barang yang siap dilelang (terlambat >15 hari)
-     */
+
     public function index()
     {
         $today = Carbon::today()->startOfDay();
-        // Sesuai aturan: minimal terlambat 15 hari dari jatuh tempo
         $batasMinimalLelang = $today->copy()->subDays(15);
 
         $lelangables = DetailGadai::with(['nasabah', 'type', 'pelelangan'])
             ->whereDate('jatuh_tempo', '<=', $batasMinimalLelang)
             ->where(function($q) {
-                // Tampilkan yang belum ada di tabel lelang ATAU yang sudah ada tapi statusnya masih 'siap'
                 $q->whereHas('pelelangan', function($query) {
                     $query->where('status_lelang', 'siap');
                 })
@@ -31,7 +27,6 @@ class PelelanganController extends Controller
             })
             ->get()
             ->map(function ($d) {
-                // ✅ PERBAIKAN: Hapus parameter $today, biarkan otomatis
                 $kalkulasi = $this->hitungKalkulasi($d);
 
                 return [
@@ -59,9 +54,6 @@ class PelelanganController extends Controller
         ]);
     }
 
-    /**
-     * Daftarkan barang ke lelang
-     */
     public function daftarkanLelang(Request $request)
     {
         $request->validate([
@@ -90,71 +82,70 @@ class PelelanganController extends Controller
         ]);
     }
 
-    /**
-     * Proses lelang (Terjual ke Pihak Ketiga)
-     */
-    public function prosesLelang(Request $request, $detailGadaiId)
-    {
-        $request->validate([
-            'nominal_diterima' => 'required|numeric|min:1',
-            'metode_pembayaran' => 'required|in:cash,transfer',
-            'bukti_transfer' => 'required_if:metode_pembayaran,transfer|image|max:2048',
-            'keterangan' => 'nullable|string|max:500',
+
+public function prosesLelang(Request $request, $detailGadaiId)
+{
+    $request->validate([
+        'nominal_diterima' => 'required|numeric|min:1',
+        'metode_pembayaran' => 'required|in:cash,transfer',
+        'bukti_transfer' => 'required_if:metode_pembayaran,transfer|image|max:2048',
+        'keterangan' => 'nullable|string|max:500',
+    ]);
+
+    DB::beginTransaction();
+    try {
+        $pelelangan = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
+            ->where('detail_gadai_id', $detailGadaiId)
+            ->firstOrFail();
+
+        if ($pelelangan->status_lelang !== 'siap') {
+            return response()->json(['success' => false, 'message' => 'Hanya status "siap" yang bisa diproses'], 400);
+        }
+
+        $gadai = $pelelangan->detailGadai;
+
+        $waktuSekarang = now();
+        $kalkulasi = $this->hitungKalkulasi($gadai, $waktuSekarang);
+        $totalHutangDibulatkan = (float) $kalkulasi['total_hutang'];
+        $nominalDiterima = (float) $request->nominal_diterima;
+        $keuntungan = $nominalDiterima - $totalHutangDibulatkan;
+        $pathMinio = null;
+        if ($request->metode_pembayaran === 'transfer' && $request->hasFile('bukti_transfer')) {
+            $nasabah = $gadai->nasabah;
+            $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
+            $tipeBarang = strtolower($gadai->type->nama_type ?? 'umum');
+            
+            $folderBase = "{$folderNasabah}/{$tipeBarang}/{$gadai->no_gadai}/pelelangan";
+            $file = $request->file('bukti_transfer');
+            $filename = "bukti-lelang-" . ($nasabah->nik ?? 'no-nik') . "-" . time() . "." . $file->getClientOriginalExtension();
+
+            $pathMinio = $file->storeAs($folderBase, $filename, 'minio');
+        }
+        $pelelangan->update([
+            'status_lelang' => 'terlelang',
+            'nominal_diterima' => $nominalDiterima,
+            'keuntungan_lelang' => $keuntungan, 
+            'metode_pembayaran' => $request->metode_pembayaran,
+            'waktu_bayar' => $waktuSekarang,
+            'bukti_transfer' => $pathMinio,
+            'keterangan' => $request->keterangan ?? 'Barang terjual lelang',
         ]);
 
-        DB::beginTransaction();
-        try {
-            $pelelangan = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
-                ->where('detail_gadai_id', $detailGadaiId)
-                ->firstOrFail();
+        DB::commit();
+        return response()->json([
+            'success' => true, 
+            'message' => 'Barang berhasil terlelang', 
+            'data' => $pelelangan,
+            'rincian_kalkulasi' => $kalkulasi 
+        ]);
 
-            if ($pelelangan->status_lelang !== 'siap') {
-                return response()->json(['success' => false, 'message' => 'Hanya status "siap" yang bisa diproses'], 400);
-            }
-
-            $gadai = $pelelangan->detailGadai;
-            $kalkulasi = $this->hitungKalkulasi($gadai, Carbon::today());
-            $nominalDiterima = (float) $request->nominal_diterima;
-            $keuntungan = $nominalDiterima - $kalkulasi['total_hutang'];
-
-            $pathMinio = null;
-            if ($request->metode_pembayaran === 'transfer' && $request->hasFile('bukti_transfer')) {
-                $nasabah = $gadai->nasabah;
-                $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
-                $tipeBarang = strtolower($gadai->type->nama_type ?? 'umum');
-                
-                // Path: Nama_Nasabah/tipe/no_gadai/pelelangan/
-                $folderBase = "{$folderNasabah}/{$tipeBarang}/{$gadai->no_gadai}/pelelangan";
-                
-                $file = $request->file('bukti_transfer');
-                $filename = "bukti-lelang-" . ($nasabah->nik ?? 'no-nik') . "-" . time() . "." . $file->getClientOriginalExtension();
-
-                // Store ke disk MINIO
-                $pathMinio = $file->storeAs($folderBase, $filename, 'minio');
-            }
-
-            $pelelangan->update([
-                'status_lelang' => 'terlelang',
-                'nominal_diterima' => $nominalDiterima,
-                'keuntungan_lelang' => $keuntungan,
-                'metode_pembayaran' => $request->metode_pembayaran,
-                'waktu_bayar' => now(),
-                'bukti_transfer' => $pathMinio,
-                'keterangan' => $request->keterangan ?? 'Barang terjual lelang',
-            ]);
-
-            DB::commit();
-            return response()->json(['success' => true, 'message' => 'Barang berhasil terlelang', 'data' => $pelelangan]);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-        }
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
     }
+}
 
-    /**
-     * Lunasi (Ditebus oleh Nasabah sendiri)
-     */
-    public function lunasi(Request $request, $detailGadaiId)
+public function lunasi(Request $request, $detailGadaiId)
     {
         $request->validate([
             'nominal_diterima' => 'required|numeric|min:1',
@@ -165,7 +156,6 @@ class PelelanganController extends Controller
 
         DB::beginTransaction();
         try {
-            // Tambahkan eager loading 'detailGadai.type' agar bisa mengambil nama_type
             $pelelangan = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
                 ->where('detail_gadai_id', $detailGadaiId)
                 ->firstOrFail();
@@ -175,15 +165,15 @@ class PelelanganController extends Controller
             }
 
             $gadai = $pelelangan->detailGadai;
-            $pathMinio = null;
+            $kalkulasi = $this->hitungKalkulasi($gadai, now());
+            $totalHarusBayar = (float) $kalkulasi['total_hutang'];
 
+            $pathMinio = null;
             if ($request->metode_pembayaran === 'transfer' && $request->hasFile('bukti_transfer')) {
                 $nasabah = $gadai->nasabah;
                 $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap ?? 'unknown');
-                
                 $tipeBarang = strtolower($gadai->type->nama_type ?? 'umum');
                 $folderBase = "{$folderNasabah}/{$tipeBarang}/{$gadai->no_gadai}/pelunasan";
-                
                 $file = $request->file('bukti_transfer');
                 $filename = "bukti-pelunasan-" . ($nasabah->nik ?? 'no-nik') . "-" . time() . "." . $file->getClientOriginalExtension();
                 $pathMinio = $file->storeAs($folderBase, $filename, 'minio');
@@ -191,15 +181,14 @@ class PelelanganController extends Controller
 
             $pelelangan->update([
                 'status_lelang' => 'lunas',
-                'nominal_diterima' => (float) $request->nominal_diterima,
+                'nominal_diterima' => $totalHarusBayar, // PAKSA gunakan angka sistem agar SINKRON
                 'keuntungan_lelang' => 0,
                 'metode_pembayaran' => $request->metode_pembayaran,
                 'waktu_bayar' => now(),
                 'bukti_transfer' => $pathMinio,
-                'keterangan' => $request->catatan ?? 'Ditebus nasabah (lelang dibatalkan)',
+                'keterangan' => $request->catatan ?? 'Ditebus nasabah',
             ]);
 
-            // Update status di tabel utama detail_gadai menjadi lunas
             $gadai->update(['status' => 'lunas']);
 
             DB::commit();
@@ -214,50 +203,57 @@ class PelelanganController extends Controller
      * Riwayat Transaksi
      */
 public function history()
-{
-    $history = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
-        ->whereIn('status_lelang', ['terlelang', 'lunas'])
-        ->orderBy('waktu_bayar', 'desc')
-        ->get()
-        ->map(function ($p) {
+    {
+        $history = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
+            ->whereIn('status_lelang', ['terlelang', 'lunas'])
+            ->orderBy('waktu_bayar', 'desc')
+            ->get()
+            ->map(function ($p) {
+                if (!$p->detailGadai) return null;
 
-            if (!$p->detailGadai) {
-                return null;
-            }
+                $urlBukti = $p->bukti_transfer ? url('/api/files/' . $p->bukti_transfer) : null;
 
-            $urlBukti = $p->bukti_transfer ? url('/api/files/' . $p->bukti_transfer) : null;
+                // 1. Kalkulasi berdasarkan waktu bayar yang tersimpan
+                $kalkulasi = $this->hitungKalkulasi($p->detailGadai, $p->waktu_bayar);
+                $nominalMasuk = (float) $p->nominal_diterima;
+                $totalHutangSistem = (float) $kalkulasi['total_hutang'];
 
+                // 2. LOGIKA SINKRONISASI TAMPILAN
+                if (strtolower($p->status_lelang) === 'lunas') {
+                    // Jika lunas, hutang di tampilan harus sama dengan uang masuk (Profit 0)
+                    $hutangTampil = $nominalMasuk; 
+                    $keuntunganMurni = 0;
+                } else {
+                    // Jika terlelang, hutang tetap hitungan sistem, selisihnya profit
+                    $hutangTampil = $totalHutangSistem;
+                    $keuntunganMurni = $nominalMasuk - $totalHutangSistem;
+                }
 
-            $kalkulasi = $this->hitungKalkulasi($p->detailGadai, $p->waktu_bayar);
+                return [
+                    'id' => $p->id,
+                    'no_gadai' => $p->detailGadai->no_gadai ?? '-',
+                    'nama_nasabah' => $p->detailGadai->nasabah->nama_lengkap ?? '-',
+                    'type' => $p->detailGadai->type->nama_type ?? '-',
+                    'jatuh_tempo' => $p->detailGadai->jatuh_tempo,
+                    'hari_terlambat' => (int) $kalkulasi['hari_terlambat'],
+                    'uang_pinjaman' => (float) $p->detailGadai->uang_pinjaman,
+                    'bunga' => (float) $kalkulasi['bunga'],
+                    'penalty' => (float) $kalkulasi['penalty'],
+                    'denda' => (float) $kalkulasi['denda'],
+                    'hutang' => $hutangTampil, // <--- Sudah sinkron
+                    'nominal_masuk' => $nominalMasuk,
+                    'keuntungan' => $keuntunganMurni, 
+                    'status' => $p->status_lelang,
+                    'metode' => $p->metode_pembayaran,
+                    'tanggal' => $p->waktu_bayar ? $p->waktu_bayar->timezone('Asia/Jakarta')->format('d-m-Y H:i') : '-',
+                    'keterangan' => $p->keterangan ?? '-',
+                    'bukti' => $urlBukti, 
+                ];
+            })
+            ->filter()->values(); 
 
-            return [
-                'id' => $p->id,
-                'no_gadai' => $p->detailGadai->no_gadai ?? '-',
-                'nama_nasabah' => $p->detailGadai->nasabah->nama_lengkap ?? '-',
-                'type' => $p->detailGadai->type->nama_type ?? '-',
-                'jatuh_tempo' => $p->detailGadai->jatuh_tempo,
-                'hari_terlambat' => (int) $kalkulasi['hari_terlambat'],
-                'uang_pinjaman' => (float) $p->detailGadai->uang_pinjaman,
-                'bunga' => (float) $kalkulasi['bunga'],
-                'penalty' => (float) $kalkulasi['penalty'],
-                'denda' => (float) $kalkulasi['denda'],
-                'hutang' => (float) $kalkulasi['total_hutang'], 
-                'nominal_masuk' => (float) $p->nominal_diterima,
-                'keuntungan' => (float) $p->keuntungan_lelang,
-                'status' => $p->status_lelang,
-                'metode' => $p->metode_pembayaran,
-                'tanggal' => $p->waktu_bayar 
-                    ? $p->waktu_bayar->timezone('Asia/Jakarta')->format('d-m-Y H:i') 
-                    : '-',
-                'keterangan' => $p->keterangan ?? '-',
-                'bukti' => $urlBukti, 
-            ];
-        })
-        ->filter() 
-        ->values(); 
-
-    return response()->json(['success' => true, 'data' => $history]);
-}
+        return response()->json(['success' => true, 'data' => $history]);
+    }
 
 public function show($detailGadaiId)
 {
@@ -269,7 +265,6 @@ public function show($detailGadaiId)
         'detailGadai.perhiasan'
     ])->where('detail_gadai_id', $detailGadaiId)->firstOrFail();
 
-    // 2. VALIDASI KRUSIAL: Pastikan relasi detailGadai ada
     $gadai = $pelelangan->detailGadai;
     
     if (!$gadai) {

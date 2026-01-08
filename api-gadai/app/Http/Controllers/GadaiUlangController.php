@@ -29,7 +29,6 @@ class GadaiUlangController extends Controller
             return response()->json(['success' => false, 'message' => 'NIK wajib diisi.'], 422);
         }
 
-        // Pastikan model DataNasabah sudah memiliki property protected $table = 'data_nasabah';
         $nasabah = DataNasabah::where('nik', $nik)->first();
 
         if (!$nasabah) {
@@ -54,7 +53,7 @@ class GadaiUlangController extends Controller
 
     public function store(Request $request)
     {
-        // PERBAIKAN: Ubah 'data_nasabahs' menjadi 'data_nasabah' di validasi exists
+
         $validator = Validator::make($request->all(), [
             'nasabah.id'           => 'required|exists:data_nasabah,id', 
             'barang.type_hp_id'    => 'required|exists:type_hp,id',
@@ -77,9 +76,7 @@ class GadaiUlangController extends Controller
 
             $nasabah = DataNasabah::findOrFail($nasabahId);
 
-            // =========================
             // STEP 1: GENERATE NOMOR GADAI
-            // =========================
             $tanggal = date_create($detailInput['tanggal_gadai']);
             [$day, $month, $year] = [$tanggal->format('d'), $tanggal->format('m'), $tanggal->format('Y')];
 
@@ -102,9 +99,8 @@ class GadaiUlangController extends Controller
                 'status'        => 'proses',
             ]);
 
-            // =========================
+
             // STEP 2: SIMPAN DATA BARANG HP
-            // =========================
             $pureGradeType = strtolower(str_replace(['-', ' '], '_', $barangInput['grade_type']));
 
             $barang = GadaiHp::create([
@@ -124,7 +120,6 @@ class GadaiUlangController extends Controller
                 'kunci_pola'      => $barangInput['kunci_pola'] ?? null,
             ]);
 
-            // Sync Kerusakan & Kelengkapan
             if (!empty($barangInput['kerusakan'])) {
                 $barang->kerusakanList()->sync($barangInput['kerusakan']);
             }
@@ -132,9 +127,8 @@ class GadaiUlangController extends Controller
                 $barang->kelengkapanList()->sync($barangInput['kelengkapan']);
             }
 
-           // =========================
             // STEP 3: KALKULASI (DENGAN PEMBULATAN RIBUAN)
-            // =========================
+
             $hargaMaster = HargaHp::where('type_hp_id', $barang->type_hp_id)->first();
             if (!$hargaMaster) throw new \Exception("Harga Master untuk tipe ini belum diatur.");
 
@@ -145,41 +139,25 @@ class GadaiUlangController extends Controller
 
             $colPinjaman = 'grade_' . $pureGradeType;
             $colTaksiran = 'taksiran_' . $pureGradeType;
-
-            // Pastikan nilai dasar adalah angka
             $basePinjaman = (float) ($gradeData->{$colPinjaman} ?? 0);
             $baseTaksiran = (float) ($gradeData->{$colTaksiran} ?? 0);
-
-            // Hitung total persen kerusakan
             $totalPersenKerusakan = DB::table('gadai_hp_kerusakan')
                 ->where('gadai_hp_id', $barang->id)
                 ->join('kerusakan', 'kerusakan.id', '=', 'gadai_hp_kerusakan.kerusakan_id')
                 ->sum('kerusakan.persen') ?: 0;
-
-            // Multiplier (Contoh: Kerusakan 25% -> Multiplier 0.75)
             $multiplier = max(0, min(1, (100 - (float)$totalPersenKerusakan) / 100));
-            
-            // Kalkulasi kotor (Sebelum dibulatkan)
             $rawPinjaman = $basePinjaman * $multiplier;
             $rawTaksiran = $baseTaksiran * $multiplier;
-
-            // --- LOGIKA PEMBULATAN RIBUAN KE BAWAH ---
-            // 198.750 -> floor(198.750 / 1000) * 1000 = 198.000
             $finalUangPinjaman = floor($rawPinjaman / 1000) * 1000;
             $finalTaksiran     = floor($rawTaksiran / 1000) * 1000;
-
-            // Update Detail Gadai dengan nilai yang SUDAH BULAT
             $detail->update([
                 'taksiran'      => $finalTaksiran,
                 'uang_pinjaman' => $finalUangPinjaman,
             ]);
-
-            // Update juga di tabel GadaiHp (grade_nominal) agar sinkron
             $barang->update(['grade_nominal' => $finalUangPinjaman]);
 
-            // =========================
             // STEP 4: UPLOAD DOKUMEN SOP
-            // =========================
+
             $this->uploadDokumenSop($request, $barang, $nasabah, $detail);
 
             DB::commit();

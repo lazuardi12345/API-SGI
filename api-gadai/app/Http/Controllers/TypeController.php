@@ -11,21 +11,17 @@ class TypeController extends Controller
 
     public function index(Request $request)
     {
-        $perPage = $request->get('per_page', 10); // default 10
-        $search = $request->get('search');        // optional
+        $perPage = $request->get('per_page', 10); 
+        $search = $request->get('search');        
         $page = $request->get('page', 1);
 
         $query = Type::query();
-
-        // 🔍 Jika ada pencarian
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
                 $q->where('nomor_type', 'like', "%{$search}%")
                   ->orWhere('nama_type', 'like', "%{$search}%");
             });
         }
-
-        // 📄 Pagination
         $types = $query->orderBy('id', 'desc')->paginate($perPage);
 
         return response()->json([
@@ -41,9 +37,6 @@ class TypeController extends Controller
         ], 200);
     }
 
-    /**
-     * ➕ Simpan data type baru
-     */
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -79,9 +72,6 @@ class TypeController extends Controller
         ], 201);
     }
 
-    /**
-     * 🔍 Detail type berdasarkan ID
-     */
     public function show($id)
     {
         $type = Type::find($id);
@@ -100,9 +90,6 @@ class TypeController extends Controller
         ], 200);
     }
 
-    /**
-     * ✏️ Update data type
-     */
     public function update(Request $request, $id)
     {
         $type = Type::find($id);
@@ -162,9 +149,6 @@ class TypeController extends Controller
         ], 200);
     }
 
-    /**
-     * 🗑️ Hapus data type
-     */
     public function destroy($id)
     {
         $type = Type::find($id);

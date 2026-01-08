@@ -7,19 +7,15 @@ use Illuminate\Support\Facades\Log;
 
 class StorageController extends Controller
 {
-    /**
-     * Ambil file dari MinIO dan streaming ke browser
-     */
+
     public function get(string $path)
     {
         /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
         $disk = Storage::disk('minio');
 
-        // Sanitasi path
         $path = ltrim($path, '/');
         $path = str_replace('..', '', $path);
 
-        // Log untuk debug
         Log::info('StorageController: Accessing file', [
             'path' => $path,
             'exists' => $disk->exists($path)
@@ -38,8 +34,6 @@ class StorageController extends Controller
             Log::error('StorageController: Cannot read stream', ['path' => $path]);
             return response()->json(['message' => 'Cannot read file'], 500);
         }
-
-        // ✅ PERBAIKAN: Gunakan mimeType() bukan getMimetype()
         try {
             $mime = $disk->mimeType($path);
         } catch (\Exception $e) {
@@ -47,8 +41,6 @@ class StorageController extends Controller
                 'path' => $path,
                 'error' => $e->getMessage()
             ]);
-
-            // Fallback ke extension-based detection
             $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
             $mimeTypes = [
                 'jpg'  => 'image/jpeg',

@@ -16,9 +16,7 @@ class GradeHpController extends Controller
         $this->gradeCalculator = $gradeCalculator;
     }
 
-    /**
-     * Tampilkan semua grade dengan relasi hargaHp
-     */
+
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -33,9 +31,7 @@ class GradeHpController extends Controller
         ]);
     }
 
-    /**
-     * Simpan grade baru dengan kalkulasi otomatis (Termasuk Taksiran)
-     */
+
     public function store(Request $request)
     {
         $request->validate([
@@ -52,14 +48,10 @@ class GradeHpController extends Controller
 
         $hargaHp = HargaHp::findOrFail($request->harga_hp_id);
         $pasarTrend = $request->input('pasar_trend', 'turun');
-
-        // Service sekarang mengembalikan Grade dan Taksiran
         $calculatedData = $this->gradeCalculator->calculateAllGrades(
             $hargaHp->harga_barang,
             $pasarTrend
         );
-
-        // Disatukan dalam satu create
         $grade = GradeHp::create(array_merge(
             ['harga_hp_id' => $request->harga_hp_id],
             $calculatedData
@@ -72,9 +64,6 @@ class GradeHpController extends Controller
         ], 201);
     }
 
-    /**
-     * Update otomatis berdasarkan trend pasar
-     */
     public function update(Request $request, $id)
     {
         $grade = GradeHp::findOrFail($id);
@@ -97,22 +86,17 @@ class GradeHpController extends Controller
         ]);
     }
 
-    /**
-     * Update manual (Semua kolom Taksiran dan Grade)
-     */
     public function updateManual(Request $request, $id)
     {
         $grade = GradeHp::findOrFail($id);
 
         $request->validate([
-            // Validasi Grade
             'grade_a_dus' => 'required|integer|min:0',
             'grade_a_tanpa_dus' => 'required|integer|min:0',
             'grade_b_dus' => 'required|integer|min:0',
             'grade_b_tanpa_dus' => 'required|integer|min:0',
             'grade_c_dus' => 'required|integer|min:0',
             'grade_c_tanpa_dus' => 'required|integer|min:0',
-            // Validasi Taksiran
             'taksiran_a_dus' => 'required|integer|min:0',
             'taksiran_a_tanpa_dus' => 'required|integer|min:0',
             'taksiran_b_dus' => 'required|integer|min:0',
@@ -130,9 +114,7 @@ class GradeHpController extends Controller
         ]);
     }
 
-    /**
-     * Preview kalkulasi (Untuk Front-end sebelum simpan)
-     */
+
     public function previewCalculation(Request $request)
     {
         $request->validate([

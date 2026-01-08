@@ -58,23 +58,50 @@ class GadaiEmasController extends Controller
             // =========================
             $detailInput = $request->input('detail', []);
 
-            $lastDetail = DetailGadai::lockForUpdate()->orderBy('id', 'desc')->first();
-            $next = $lastDetail ? (int) substr($lastDetail->no_nasabah, -4) + 1 : 1;
+// Ambil tanggal hari ini untuk filter
+$today = now()->format('Y-m-d');
 
-            $noNasabah = date('m') . substr(date('Y'), 2) . str_pad($next, 4, '0', STR_PAD_LEFT);
-            $noGadai   = "SGI-" . date('d-m-Y') . "-" . str_pad($next, 4, '0', STR_PAD_LEFT);
+// Cari urutan terakhir KHUSUS untuk hari ini saja agar SGI-DD-MM-YYYY tidak duplikat
+$lastDetailToday = DetailGadai::whereDate('created_at', $today)
+    ->lockForUpdate()
+    ->orderBy('id', 'desc')
+    ->first();
 
-            $detail = DetailGadai::create([
-                'no_gadai'      => $noGadai,
-                'no_nasabah'    => $noNasabah,
-                'nasabah_id'    => $nasabah->id,
-                'tanggal_gadai' => $detailInput['tanggal_gadai'] ?? now(),
-                'jatuh_tempo'   => $detailInput['jatuh_tempo'] ?? now()->addDays(15),
-                'type_id'       => $detailInput['type_id'],
-                'taksiran'      => $detailInput['taksiran'] ?? 0,
-                'uang_pinjaman' => $detailInput['uang_pinjaman'] ?? 0,
-                'status'        => 'proses',
-            ]);
+if ($lastDetailToday) {
+    // Ambil 4 digit terakhir dari no_gadai aslinya, lalu tambah 1
+    $lastIncrement = (int) substr($lastDetailToday->no_gadai, -4);
+    $next = $lastIncrement + 1;
+} else {
+    $next = 1;
+}
+
+// Format No Nasabah: MMyyXXXX
+$noNasabah = date('m') . substr(date('Y'), 2) . str_pad($next, 4, '0', STR_PAD_LEFT);
+// Format No Gadai: SGI-DD-MM-YYYY-XXXX
+$noGadai   = "SGI-" . date('d-m-Y') . "-" . str_pad($next, 4, '0', STR_PAD_LEFT);
+
+// DOUBLE CHECK: Pastikan nomor ini belum benar-benar ada di DB (Safety Net)
+$exists = DetailGadai::where('no_gadai', $noGadai)->exists();
+if ($exists) {
+    // Jika masih ada (karena tabrakan race condition), naikkan terus sampai dapat yang kosong
+    while (DetailGadai::where('no_gadai', $noGadai)->exists()) {
+        $next++;
+        $noGadai = "SGI-" . date('d-m-Y') . "-" . str_pad($next, 4, '0', STR_PAD_LEFT);
+        $noNasabah = date('m') . substr(date('Y'), 2) . str_pad($next, 4, '0', STR_PAD_LEFT);
+    }
+}
+
+$detail = DetailGadai::create([
+    'no_gadai'      => $noGadai,
+    'no_nasabah'    => $noNasabah,
+    'nasabah_id'    => $nasabah->id,
+    'tanggal_gadai' => $detailInput['tanggal_gadai'] ?? now(),
+    'jatuh_tempo'   => $detailInput['jatuh_tempo'] ?? now()->addDays(15),
+    'type_id'       => $detailInput['type_id'],
+    'taksiran'      => (int) ($detailInput['taksiran'] ?? 0),
+    'uang_pinjaman' => (int) ($detailInput['uang_pinjaman'] ?? 0),
+    'status'        => 'proses',
+]);
 
             // =========================
             // STEP 3: BARANG EMAS

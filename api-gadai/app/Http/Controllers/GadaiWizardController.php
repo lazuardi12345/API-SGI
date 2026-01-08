@@ -46,9 +46,7 @@ class GadaiWizardController extends Controller
             $detailInput  = $request->input('detail', []);
             $barangInput  = $request->input('barang', []);
 
-            // =========================
             // STEP 1: SIMPAN NASABAH + FOTO KTP
-            // =========================
             $nasabahData = [
                 'user_id'      => $user->id,
                 'nama_lengkap' => $nasabahInput['nama_lengkap'],
@@ -70,9 +68,7 @@ class GadaiWizardController extends Controller
                 $nasabah->update(['foto_ktp' => $ktpPath]);
             }
 
-            // =========================
             // STEP 2: GENERATE NOMOR GADAI
-            // =========================
             $tanggal = date_create($detailInput['tanggal_gadai']);
             [$day, $month, $year] = [$tanggal->format('d'), $tanggal->format('m'), $tanggal->format('Y')];
 
@@ -99,9 +95,7 @@ class GadaiWizardController extends Controller
                 'status'        => 'proses',
             ]);
 
-            // =========================
             // STEP 3: SIMPAN DATA BARANG HP (LENGKAP)
-            // =========================
             $pureGradeType = strtolower(str_replace(['-', ' '], '_', $barangInput['grade_type']));
 
             $barangData = [
@@ -111,7 +105,7 @@ class GadaiWizardController extends Controller
                 'type_hp_id'      => $barangInput['type_hp_id'],
                 'grade_hp_id'     => $barangInput['grade_hp_id'] ?? null,
                 'grade_type'      => $pureGradeType,
-                'grade_nominal'   => 0, // Will be updated after calculation
+                'grade_nominal'   => 0,
                 'imei'            => $barangInput['imei'] ?? null,
                 'warna'           => $barangInput['warna'] ?? null,
                 'ram'             => $barangInput['ram'] ?? null,
@@ -123,7 +117,6 @@ class GadaiWizardController extends Controller
 
             $barang = GadaiHp::create($barangData);
 
-            // Sync Kerusakan & Kelengkapan
             if (!empty($barangInput['kerusakan'])) {
                 $barang->kerusakanList()->sync($barangInput['kerusakan']);
             }
@@ -131,9 +124,7 @@ class GadaiWizardController extends Controller
                 $barang->kelengkapanList()->sync($barangInput['kelengkapan']);
             }
 
-          // =========================
-            // STEP 4: KALKULASI HARGA DARI GRADE_HP (VERSI PERBAIKAN TOTAL)
-            // =========================
+            // STEP 4: KALKULASI HARGA DARI GRADE_HP 
             $finalTaksiran = 0;
             $finalUangPinjaman = 0;
             $totalPersenKerusakan = 0;
@@ -193,9 +184,7 @@ class GadaiWizardController extends Controller
                 'grade_nominal' => $finalUangPinjaman
             ]);
 
-            // =========================
             // STEP 5: UPLOAD DOKUMEN SOP
-            // =========================
             $this->uploadDokumenSop($request, $barang, $nasabah, $detail);
 
             DB::commit();

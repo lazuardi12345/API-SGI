@@ -16,9 +16,6 @@ class GadaiHpController extends Controller
         'samsung_account','galaxy_store','icloud','battery','3utools','iunlocker','cek_pencurian'
     ];
 
-    /**
-     * Convert dokumen to proper frontend URL
-     */
     private function convertDokumen($dokumen)
     {
         if (!$dokumen) return null;
@@ -48,16 +45,11 @@ class GadaiHpController extends Controller
     private function deleteOldFiles(string $folder, string $field, string $nik): void
     {
         try {
-            // Pattern: body_1234567890.* (hapus semua extension)
             $pattern = "{$field}_{$nik}.";
-            
-            // List semua file di folder
             $files = Storage::disk('minio')->files($folder);
             
             foreach ($files as $file) {
                 $basename = basename($file);
-                
-                // Jika nama file cocok dengan pattern, hapus
                 if (str_starts_with($basename, $pattern)) {
                     Storage::disk('minio')->delete($file);
                     Log::info('Deleted old file', ['file' => $file]);
@@ -88,7 +80,7 @@ class GadaiHpController extends Controller
 
         $items = $data->getCollection()->map(function ($hp) {
             $hp->dokumen_pendukung = $this->convertDokumen($hp->dokumenPendukungHp);
-            unset($hp->dokumenPendukungHp); // remove duplicate
+            unset($hp->dokumenPendukungHp); 
             return $hp;
         });
 
@@ -195,22 +187,10 @@ public function update(Request $request, $id)
         'kelengkapanList',
         'kerusakanList'
     ])->findOrFail($id);
-
-    /**
-     * =====================================================
-     * 1. UPDATE DATA HP DASAR
-     * =====================================================
-     */
     $hp->update($request->only([
         'imei','warna','kunci_password','kunci_pin','kunci_pola',
         'ram','rom','grade_hp_id','grade_type'
     ]));
-
-    /**
-     * =====================================================
-     * 2. UPDATE GRADE NOMINAL
-     * =====================================================
-     */
     if ($request->filled('grade_hp_id') && $request->filled('grade_type')) {
         $grade = GradeHp::find($request->grade_hp_id);
 
@@ -222,26 +202,12 @@ public function update(Request $request, $id)
 
         $hp->update(['grade_nominal' => $newNominal]);
     }
-
-    /**
-     * =====================================================
-     * 3. SYNC KELENGKAPAN & KERUSAKAN
-     * =====================================================
-     */
     if ($request->has('kelengkapan'))
         $hp->kelengkapanList()->sync($this->normalizeItems($request->kelengkapan));
 
     if ($request->has('kerusakan'))
         $hp->kerusakanList()->sync($this->normalizeItems($request->kerusakan));
-
-    // Refresh relasi
     $hp->load(['kelengkapanList', 'kerusakanList']);
-
-    /**
-     * =====================================================
-     * 4. HITUNG TOTAL KELENGKAPAN & KERUSAKAN
-     * =====================================================
-     */
     $totalKelengkapan = $hp->kelengkapanList->sum(function ($k) {
         return $k->pivot->nominal_override ?? $k->nominal ?? 0;
     });
@@ -249,37 +215,16 @@ public function update(Request $request, $id)
     $totalKerusakan = $hp->kerusakanList->sum(function ($k) {
         return $k->pivot->nominal_override ?? $k->nominal ?? 0;
     });
-
-    /**
-     * =====================================================
-     * 5. PERHITUNGAN AKHIR
-     * =====================================================
-     */
-    // TAKSIRAN = HARGA GRADE (FIX)
     $taksiranAkhir = $hp->grade_nominal;
-
-    // PINJAMAN = Taksiran + Kelengkapan - Kerusakan
     $uangPinjaman = ($taksiranAkhir + $totalKelengkapan) - $totalKerusakan;
 
     if ($uangPinjaman < 0) $uangPinjaman = 0;
-
-    /**
-     * =====================================================
-     * 6. UPDATE DETAIL GADAI
-     * =====================================================
-     */
     $detail = $hp->detailGadai;
     if ($detail) {
         $detail->taksiran = $taksiranAkhir;
         $detail->uang_pinjaman = $uangPinjaman;
         $detail->save();
     }
-
-    /**
-     * =====================================================
-     * 7. UPDATE DOKUMEN
-     * =====================================================
-     */
     $dokumen = $hp->dokumenPendukungHp()->firstOrCreate([]);
 
     $nasabah = $hp->detailGadai->nasabah;
@@ -291,26 +236,16 @@ public function update(Request $request, $id)
 
     foreach ($this->dokumenFields as $field) {
         if ($request->hasFile($field)) {
-
-            // hapus file lama
             $this->deleteOldFiles($folder, $field, $nasabahNik);
-
             $file = $request->file($field);
             $ext = $file->getClientOriginalExtension();
             $fileName = "{$field}_{$nasabahNik}.{$ext}";
-
-            // upload baru
             $dokumen->$field = $file->storeAs($folder, $fileName, 'minio');
         }
     }
 
     $dokumen->save();
 
-    /**
-     * =====================================================
-     * 8. RETURN RESPONSE
-     * =====================================================
-     */
     $hp->dokumen_pendukung = $this->convertDokumen($dokumen);
     unset($hp->dokumenPendukungHp);
 

@@ -30,7 +30,8 @@ return [
         'https://www.api-gadai.cash-gampang.com',
         'http://ardi.local:3000',
         'http://192.182.6.107:3000',
-          'http://localhost:3001',
+        'http://localhost:3001',
+        'https://doug-cartoon-processes-turner.trycloudflare.com'
 
     ],
 

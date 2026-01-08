@@ -8,9 +8,7 @@ use Illuminate\Support\Facades\Validator;
 
 class KelengkapanEmasController extends Controller
 {
-    /**
-     * List semua kelengkapan
-     */
+
     public function index()
     {
         $kelengkapan = KelengkapanEmas::orderBy('nama_kelengkapan')->get();
@@ -21,9 +19,7 @@ class KelengkapanEmasController extends Controller
         ]);
     }
 
-    /**
-     * Tambah kelengkapan baru
-     */
+
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -48,9 +44,6 @@ class KelengkapanEmasController extends Controller
         ], 201);
     }
 
-    /**
-     * Ambil detail kelengkapan berdasarkan ID
-     */
     public function show($id)
     {
         $kelengkapan = KelengkapanEmas::find($id);
@@ -68,9 +61,7 @@ class KelengkapanEmasController extends Controller
         ]);
     }
 
-    /**
-     * Update kelengkapan
-     */
+
     public function update(Request $request, $id)
     {
         $kelengkapan = KelengkapanEmas::find($id);
@@ -104,9 +95,6 @@ class KelengkapanEmasController extends Controller
         ]);
     }
 
-    /**
-     * Hapus kelengkapan
-     */
     public function destroy($id)
     {
         $kelengkapan = KelengkapanEmas::find($id);

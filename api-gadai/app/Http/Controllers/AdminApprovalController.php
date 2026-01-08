@@ -16,14 +16,33 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
         ? Carbon::parse($perpanjanganTerakhir->jatuh_tempo_baru) 
         : Carbon::parse($detail->jatuh_tempo);
 
+    $statusStr = strtolower($detail->status);
+    $statusSelesai = in_array($statusStr, ['lunas', 'terlelang', 'selesai']);
+    $statusProses = ($statusStr === 'proses'); 
+
     if (!$tanggalAcuan) {
-        if (in_array(strtolower($detail->status), ['lunas', 'terlelang', 'selesai'])) {
+        if ($statusSelesai) {
             $tanggalAcuan = $detail->tanggal_bayar ? Carbon::parse($detail->tanggal_bayar) : Carbon::parse($detail->updated_at);
         } else {
             $tanggalAcuan = Carbon::now();
         }
     } else {
         $tanggalAcuan = Carbon::parse($tanggalAcuan);
+    }
+
+    if ($statusProses) {
+        return [
+            'tenor_pilihan' => "0 Hari",
+            'hari_terlambat' => 0,
+            'bunga' => 0,
+            'admin' => 0,
+            'asuransi' => 0,
+            'penalty' => 0,
+            'denda' => 0,
+            'total_hutang' => 0,
+            'jatuh_tempo' => $tglJatuhTempo->format('Y-m-d'),
+            'tanggal_yang_dipakai' => $tanggalAcuan->format('Y-m-d')
+        ];
     }
 
     $hariTerlambat = 0;
@@ -88,6 +107,10 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
     $totalRaw = $pinjaman + $bunga + $denda + $penalty;
     $totalHutang = (int) (ceil($totalRaw / 1000) * 1000);
 
+    if ($statusSelesai) {
+        $totalHutang = 0;
+    }
+
     return [
         'tenor_pilihan' => (int) $tglGadai->diffInDays($tanggalAcuan) . " Hari",
         'hari_terlambat' => $hariTerlambat,
@@ -96,7 +119,7 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
         'asuransi' => $asuransiInfo,
         'penalty' => $penalty,
         'denda' => round($denda),
-        'total_hutang' => $totalHutang,
+        'total_hutang' => $totalHutang, 
         'jatuh_tempo' => $tglJatuhTempo->format('Y-m-d'),
         'tanggal_yang_dipakai' => $tanggalAcuan->format('Y-m-d')
     ];
@@ -104,9 +127,18 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
 
 public function index(Request $request)
 {
-    $data = DetailGadai::with([
+    $statusFilter = $request->get('status');
+
+    $query = DetailGadai::with([
         'nasabah', 'type', 'approvals'
-    ])->orderByDesc('created_at')->get();
+    ]);
+
+    // Logika Filter Status Spesifik sesuai alur: proses, selesai, lunas
+    if ($statusFilter && $statusFilter !== 'all') {
+        $query->where('status', $statusFilter);
+    }
+
+    $data = $query->orderByDesc('created_at')->get();
 
     $result = $data->map(function ($d) {
         $kalkulasi = $this->hitungKalkulasi($d);
@@ -118,7 +150,7 @@ public function index(Request $request)
             'id' => $d->id,
             'no_gadai' => $d->no_gadai,
             'nama_nasabah' => $d->nasabah->nama_lengkap ?? "-",
-            'status' => $d->status,
+            'status' => $d->status, 
             'pinjaman_pokok' => $d->uang_pinjaman,
             'type' => $d->type->nama_type ?? "-",
             'tenor_pilihan' => $kalkulasi['tenor_pilihan'], 

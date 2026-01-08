@@ -21,6 +21,7 @@ class DetailGadai extends Model
         'uang_pinjaman',
         'type_id',
         'nasabah_id',
+        'approval_status',
         'status',
         'nominal_bayar', 
         'tanggal_bayar', 

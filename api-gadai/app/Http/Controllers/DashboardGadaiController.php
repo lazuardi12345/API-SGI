@@ -10,17 +10,14 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardGadaiController extends Controller
 {
-    /**
-     * 📊 Ringkasan Data Gadai
-     */
+
 public function summary()
 {
-    // 1. PINJAMAN BEREDAR (Semua yang statusnya 'proses' atau 'selesai' / belum lunas)
+
     $queryBeredar = DetailGadai::whereIn('status', ['proses', 'selesai']);
     $jumlahBeredar = $queryBeredar->count();
     $nominalBeredar = $queryBeredar->sum('uang_pinjaman');
 
-    // 2. BELUM LUNAS (Khusus yang sudah lewat tempo tapi belum bayar / status 'selesai')
     $queryBelumLunas = DetailGadai::where('status', 'selesai');
     $jumlahBelumLunas = $queryBelumLunas->count();
     $nominalBelumLunas = $queryBelumLunas->sum('uang_pinjaman');
@@ -49,14 +46,11 @@ public function summary()
     ]);
 }
 
-    /**
-     * 💵 Total Pendapatan Gadai per Bulan (tahun berjalan)
-     */
+
     public function pendapatanPerBulan()
     {
         $tahunSekarang = Carbon::now()->year;
 
-        // Ambil total uang_pinjaman per bulan untuk tahun berjalan
         $data = DetailGadai::select(
                 DB::raw('MONTH(tanggal_gadai) as bulan'),
                 DB::raw('SUM(uang_pinjaman) as total_pinjaman')
@@ -67,7 +61,6 @@ public function summary()
             ->pluck('total_pinjaman', 'bulan')
             ->toArray();
 
-        // Isi bulan yang tidak ada data dengan 0
         $result = [];
         for ($i = 1; $i <= 12; $i++) {
             $result[] = [
@@ -84,9 +77,7 @@ public function summary()
         ]);
     }
 
-    /**
-     * 👥 Jumlah Nasabah per Bulan (tahun berjalan)
-     */
+
     public function nasabahPerBulan()
     {
         $tahunSekarang = Carbon::now()->year;
@@ -101,7 +92,7 @@ public function summary()
             ->pluck('total_nasabah', 'bulan')
             ->toArray();
 
-        // Isi bulan yang belum ada data dengan 0
+
         $result = [];
         for ($i = 1; $i <= 12; $i++) {
             $result[] = [
@@ -122,7 +113,7 @@ public function totalSemua()
 {
     $tahun = Carbon::now()->year;
 
-    // Hitung total unit (nasabah) per jenis gadai
+
     $totalHp = DB::table('gadai_hp')->count();
     $totalPerhiasan = DB::table('gadai_perhiasan')->count();
     $totalRetro = DB::table('gadai_retro')->count();
@@ -130,7 +121,6 @@ public function totalSemua()
 
     $totalGlobal = $totalHp + $totalPerhiasan + $totalRetro + $totalLogamMulia;
 
-    // Fungsi bantu: hitung jumlah unit per bulan (berdasarkan created_at)
     $ambilDataBulanan = function ($table) use ($tahun) {
         return DB::table($table)
             ->select(
@@ -143,13 +133,11 @@ public function totalSemua()
             ->toArray();
     };
 
-    // Ambil data per jenis
     $dataHp = $ambilDataBulanan('gadai_hp');
     $dataPerhiasan = $ambilDataBulanan('gadai_perhiasan');
     $dataRetro = $ambilDataBulanan('gadai_retro');
     $dataLogamMulia = $ambilDataBulanan('gadai_logam_mulia');
 
-    // Gabungkan hasil per bulan
     $result = [];
     for ($i = 1; $i <= 12; $i++) {
         $hpBulan = $dataHp[$i] ?? 0;
@@ -183,21 +171,13 @@ public function totalSemua()
     ]);
 }
 
-/**
- *  Statistik Pelelangan
- */
+
 public function pelelanganStats()
 {
     $tahun = Carbon::now()->year;
 
-    // Base query + relasi
     $baseQuery = Pelelangan::with(['detailGadai.type']);
 
-    /* ===============================
-     * TOTAL GLOBAL
-     * =============================== */
-
-    // SIAP → uang pinjaman
     $siap = (clone $baseQuery)
         ->where('status_lelang', 'siap')
         ->get();
@@ -209,7 +189,7 @@ public function pelelanganStats()
         }),
     ];
 
-    // TERLELANG → harga terjual
+
     $terlelang = (clone $baseQuery)
         ->where('status_lelang', 'terlelang')
         ->get();
@@ -221,7 +201,6 @@ public function pelelanganStats()
         }),
     ];
 
-    // LUNAS → TOTAL HUTANG (hasil kalkulasi)
     $lunas = (clone $baseQuery)
         ->where('status_lelang', 'lunas')
         ->get();
@@ -239,10 +218,6 @@ public function pelelanganStats()
             return (float) $kalkulasi['total_hutang'];
         }),
     ];
-
-    /* ===============================
-     * DATA BULANAN
-     * =============================== */
 
     $dataBulanan = [];
 
@@ -349,26 +324,37 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
 public function brankasDashboard()
 {
     try {
-        // 1. GANTI 'brankas' jadi 'transaksi_brankas'
-        $brankasTerakhir = DB::table('transaksi_brankas')
+        // 1. Ambil transaksi paling terakhir untuk saldo riil (Cash & Rekening)
+        $terakhir = DB::table('transaksi_brankas')
             ->orderBy('id', 'desc')
             ->first();
-        
-        $saldoSaatIni = $brankasTerakhir ? (float)$brankasTerakhir->saldo_akhir : 0;
 
+        // 2. Info Waktu
         $bulanSekarang = now()->month;
         $tahunSekarang = now()->year;
 
-        // 2. Cek tipe transaksi (pemasukan = jika kolom pemasukan > 0)
-        // Karena di tabel transaksi_brankas kamu pakai kolom 'pemasukan' dan 'pengeluaran'
+        // 3. Hitung Modal & Setoran (Logika dari fungsi index)
+        $totalModalPusat = (float) DB::table('transaksi_brankas')
+            ->where('kategori', 'topup_pusat')
+            ->sum('pemasukan');
+
+        $totalSetoranTervalidasi = (float) DB::table('transaksi_brankas')
+            ->where('kategori', 'setor_ke_admin')
+            ->where('status_validasi', 'tervalidasi')
+            ->sum('pengeluaran');
+
+        $totalSetoranPending = (float) DB::table('transaksi_brankas')
+            ->where('kategori', 'setor_ke_admin')
+            ->where('status_validasi', 'pending')
+            ->sum('pengeluaran');
+
+        // 4. Hitung Mutasi Khusus Bulan Ini (Pemasukan & Pengeluaran)
         $totalMasukBulanan = DB::table('transaksi_brankas')
-            ->where('pemasukan', '>', 0)
             ->whereMonth('created_at', $bulanSekarang)
             ->whereYear('created_at', $tahunSekarang)
             ->sum('pemasukan') ?? 0;
 
         $totalKeluarBulanan = DB::table('transaksi_brankas')
-            ->where('pengeluaran', '>', 0)
             ->whereMonth('created_at', $bulanSekarang)
             ->whereYear('created_at', $tahunSekarang)
             ->sum('pengeluaran') ?? 0;
@@ -376,9 +362,18 @@ public function brankasDashboard()
         return response()->json([
             'success' => true,
             'summary' => [
-                'saldo_akhir_saat_ini' => (int)$saldoSaatIni,
-                'total_pemasukan_bulan_ini' => (int)$totalMasukBulanan,
-                'total_pengeluaran_bulan_ini' => (int)$totalKeluarBulanan,
+                // Saldo Riil Saat Ini
+                'saldo_toko_saat_ini' => (int) ($terakhir->saldo_akhir ?? 0),
+                'saldo_rekening_saat_ini' => (int) ($terakhir->saldo_akhir_rekening ?? 0),
+                
+                // Akumulasi Modal & Setoran
+                'total_modal_dari_pusat' => (int) $totalModalPusat,
+                'total_setoran_ke_admin' => (int) $totalSetoranTervalidasi,
+                'total_setoran_pending' => (int) $totalSetoranPending,
+                
+                // Mutasi Bulanan (Untuk info tambahan)
+                'total_pemasukan_bulan_ini' => (int) $totalMasukBulanan,
+                'total_pengeluaran_bulan_ini' => (int) $totalKeluarBulanan,
             ],
             'info' => [
                 'bulan' => now()->locale('id')->monthName,
@@ -393,30 +388,35 @@ public function brankasDashboard()
     }
 }
 
-public function brankasYearlyChart()
+public function brankasYearlyChart(Request $request)
 {
     try {
-        $tahunSekarang = now()->year;
+        $tahun = $request->query('tahun', now()->year);
 
-        // Ambil data bulanan (1-12)
         $mutasiBulanan = DB::table('transaksi_brankas')
             ->select(
                 DB::raw('MONTH(created_at) as bulan'),
                 DB::raw('SUM(pemasukan) as total_masuk'),
                 DB::raw('SUM(pengeluaran) as total_keluar')
             )
-            ->whereYear('created_at', $tahunSekarang)
+            ->whereYear('created_at', $tahun)
             ->groupBy(DB::raw('MONTH(created_at)'))
             ->orderBy('bulan', 'asc')
             ->get();
 
-        // Siapkan array kosong untuk 12 bulan (agar bulan yang kosong tetap muncul 0)
         $pemasukan = array_fill(0, 12, 0);
         $pengeluaran = array_fill(0, 12, 0);
+        $saldoBulanan = array_fill(0, 12, 0); 
 
         foreach ($mutasiBulanan as $data) {
             $pemasukan[$data->bulan - 1] = (int)$data->total_masuk;
             $pengeluaran[$data->bulan - 1] = (int)$data->total_keluar;
+        }
+
+        $currentSaldo = 0;
+        for ($i = 0; $i < 12; $i++) {
+            $currentSaldo += ($pemasukan[$i] - $pengeluaran[$i]);
+            $saldoBulanan[$i] = $currentSaldo;
         }
 
         return response()->json([
@@ -424,6 +424,7 @@ public function brankasYearlyChart()
             'data' => [
                 'pemasukan' => $pemasukan,
                 'pengeluaran' => $pengeluaran,
+                'saldo_kumulatif' => $saldoBulanan,
                 'labels' => ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
             ]
         ]);

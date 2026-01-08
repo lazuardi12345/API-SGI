@@ -159,7 +159,6 @@ public function update(Request $request, $id)
     }
 
     try {
-        // Update field biasa
         $retro->update(
             $request->only([
                 'nama_barang','kode_cap','karat','potongan_batu','berat'
@@ -179,12 +178,9 @@ public function update(Request $request, $id)
 
         $folder = "{$nasabahName}/retro/{$noGadai}";
 
-        // loop semua field dokumen
         foreach ($request->dokumen_pendukung ?? [] as $field => $value) {
 
             if ($request->hasFile("dokumen_pendukung.$field")) {
-
-                // delete file lama
                 if ($dokumen->$field && Storage::disk('minio')->exists($dokumen->$field)) {
                     Storage::disk('minio')->delete($dokumen->$field);
                 }
@@ -192,23 +188,15 @@ public function update(Request $request, $id)
                 $file     = $request->file("dokumen_pendukung.$field");
                 $ext      = $file->getClientOriginalExtension();
                 $fileName = "{$field}_{$nasabahNik}.{$ext}";
-
-                // Upload baru ke MinIO
                 $path = $file->storeAs($folder, $fileName, 'minio');
-
-                // simpan path nya
                 $dokumen->$field = $path;
             }
         }
 
         $dokumen->save();
-
-        // update kelengkapan jika ada
         if ($request->filled('kelengkapan')) {
             $retro->kelengkapan()->sync($request->kelengkapan);
         }
-
-        // convert dokumen untuk response
         $retro->dokumen_pendukung = $this->convertDokumenToURL($dokumen);
 
         return response()->json([
@@ -238,7 +226,7 @@ public function destroy($id)
     if(!$retro) return response()->json(['success'=>false,'message'=>'Data tidak ditemukan.'],404);
 
     if($retro->dokumenPendukung){
-        foreach($retro->dokumenPendukung as $dok){ // loop per model
+        foreach($retro->dokumenPendukung as $dok){ 
             foreach($dok->getAttributes() as $key=>$path){
                 if(!in_array($key,['id','emas_type','emas_id','created_at','updated_at']) 
                     && $path 
@@ -246,7 +234,7 @@ public function destroy($id)
                     Storage::disk('minio')->delete($path);
                 }
             }
-            $dok->delete(); // hapus record dokumen
+            $dok->delete(); 
         }
     }
 
