@@ -53,6 +53,11 @@ class DetailGadai extends Model
         return $this->hasOne(GadaiRetro::class, 'detail_gadai_id');
     }
 
+    public function perpanjangan_tempos()
+{
+    return $this->perpanjanganTempos();
+}
+
     // Relasi tipe gadai
     public function type()
     {

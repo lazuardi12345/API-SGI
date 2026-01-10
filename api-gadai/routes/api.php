@@ -33,6 +33,7 @@ use App\Http\Controllers\BrankasController;
 use App\Http\Controllers\LaporanHarianCheckerController;
 use App\Http\Controllers\PetugasLaporanController;
 use App\Http\Controllers\AdminLaporanMingguanController;
+use App\Http\Controllers\PelunasanController;
 // ================== AUTH ================== //
 Route::post('/register', [AuthController::class, 'register'])->name('auth.register');
 Route::post('/login', [AuthController::class, 'login'])->name('auth.login');
@@ -204,6 +205,7 @@ Route::middleware(['auth:sanctum', 'role:hm'])->group(function () {
     Route::get('/laporan/struk-awal-mingguan', [AdminLaporanMingguanController::class, 'strukAwalMingguan']);
     Route::get('/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
     Route::get('/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
+    Route::get('/rekap-bulanan-lelang', [AdminLaporanMingguanController::class, 'rekapBulananPelelangan']);
 
 });
 
@@ -322,6 +324,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('admin/laporan/struk-awal-mingguan', [AdminLaporanMingguanController::class, 'strukAwalMingguan']);
     Route::get('admin/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
     Route::get('admin/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
+    Route::get('admin/rekap-bulanan-lelang', [AdminLaporanMingguanController::class, 'rekapBulananPelelangan']);
 
 
 });

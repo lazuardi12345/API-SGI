@@ -181,7 +181,7 @@ public function lunasi(Request $request, $detailGadaiId)
 
             $pelelangan->update([
                 'status_lelang' => 'lunas',
-                'nominal_diterima' => $totalHarusBayar, // PAKSA gunakan angka sistem agar SINKRON
+                'nominal_diterima' => $totalHarusBayar, 
                 'keuntungan_lelang' => 0,
                 'metode_pembayaran' => $request->metode_pembayaran,
                 'waktu_bayar' => now(),
@@ -199,9 +199,7 @@ public function lunasi(Request $request, $detailGadaiId)
         }
     }
 
-    /**
-     * Riwayat Transaksi
-     */
+
 public function history()
     {
         $history = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
@@ -213,18 +211,15 @@ public function history()
 
                 $urlBukti = $p->bukti_transfer ? url('/api/files/' . $p->bukti_transfer) : null;
 
-                // 1. Kalkulasi berdasarkan waktu bayar yang tersimpan
+
                 $kalkulasi = $this->hitungKalkulasi($p->detailGadai, $p->waktu_bayar);
                 $nominalMasuk = (float) $p->nominal_diterima;
                 $totalHutangSistem = (float) $kalkulasi['total_hutang'];
 
-                // 2. LOGIKA SINKRONISASI TAMPILAN
                 if (strtolower($p->status_lelang) === 'lunas') {
-                    // Jika lunas, hutang di tampilan harus sama dengan uang masuk (Profit 0)
                     $hutangTampil = $nominalMasuk; 
                     $keuntunganMurni = 0;
                 } else {
-                    // Jika terlelang, hutang tetap hitungan sistem, selisihnya profit
                     $hutangTampil = $totalHutangSistem;
                     $keuntunganMurni = $nominalMasuk - $totalHutangSistem;
                 }
@@ -240,7 +235,7 @@ public function history()
                     'bunga' => (float) $kalkulasi['bunga'],
                     'penalty' => (float) $kalkulasi['penalty'],
                     'denda' => (float) $kalkulasi['denda'],
-                    'hutang' => $hutangTampil, // <--- Sudah sinkron
+                    'hutang' => $hutangTampil, 
                     'nominal_masuk' => $nominalMasuk,
                     'keuntungan' => $keuntunganMurni, 
                     'status' => $p->status_lelang,
@@ -257,48 +252,61 @@ public function history()
 
 public function show($detailGadaiId)
 {
-    // 1. Ambil data lelang
-    $pelelangan = Pelelangan::with([
-        'detailGadai.nasabah', 
-        'detailGadai.type', 
-        'detailGadai.hp', 
-        'detailGadai.perhiasan'
-    ])->where('detail_gadai_id', $detailGadaiId)->firstOrFail();
+    try {
+        $pelelangan = Pelelangan::with([
+            'detailGadai.nasabah', 
+            'detailGadai.type', 
+            'detailGadai.hp', 
+            'detailGadai.perhiasan'
+        ])->where('detail_gadai_id', $detailGadaiId)->first();
 
-    $gadai = $pelelangan->detailGadai;
-    
-    if (!$gadai) {
+        if (!$pelelangan) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data pelelangan tidak ditemukan. Pastikan barang sudah didaftarkan ke daftar lelang.'
+            ], 404);
+        }
+
+        $gadai = $pelelangan->detailGadai;
+        
+        if (!$gadai) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data detail gadai terkait sudah tidak ditemukan.'
+            ], 404);
+        }
+
+        $waktuAcuan = $pelelangan->waktu_bayar ?? now();
+        $kalkulasi = $this->hitungKalkulasi($gadai, $waktuAcuan);
+
+        $fotoBarang = null;
+        if ($gadai->hp) {
+            $fotoBarang = $gadai->hp->foto_unit;
+        } elseif ($gadai->perhiasan) {
+            $fotoBarang = $gadai->perhiasan->foto_barang;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Detail data lelang berhasil dimuat',
+            'data' => [
+                'pelelangan' => $pelelangan, 
+                'kalkulasi' => $kalkulasi,
+                'foto_barang' => $fotoBarang,
+                'is_lunas' => $pelelangan->status_lelang === 'lunas',
+                'is_terlelang' => $pelelangan->status_lelang === 'terlelang'
+            ]
+        ]);
+
+    } catch (\Exception $e) {
         return response()->json([
             'success' => false,
-            'message' => 'Data detail gadai terkait sudah tidak ditemukan atau dihapus.'
-        ], 404);
+            'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage()
+        ], 500);
     }
-
-    // 3. Kalkulasi (Gunakan variabel $gadai agar lebih bersih)
-    $kalkulasi = $this->hitungKalkulasi($gadai, $pelelangan->waktu_bayar ?? now());
-
-    // 4. Ambil Foto Barang dengan Null Coalescing yang aman
-    $fotoBarang = null;
-    if ($gadai->hp) {
-        $fotoBarang = $gadai->hp->foto_unit;
-    } elseif ($gadai->perhiasan) {
-        $fotoBarang = $gadai->perhiasan->foto_barang;
-    }
-
-    return response()->json([
-        'success' => true,
-        'data' => [
-            'pelelangan' => $pelelangan, 
-            'kalkulasi' => $kalkulasi,
-            'foto_barang' => $fotoBarang
-        ]
-    ]);
 }
 
-    /**
-     * Fungsi Internal Kalkulasi Hutang
-     * ✅ SINKRONISASI DENGAN AdminApprovalController
-     */
+
     public function hitungKalkulasi($detail, $tanggalAcuan = null)
     {
         // 1. Parsing Tanggal & Reset Jam ke 00:00:00 agar SINKRON

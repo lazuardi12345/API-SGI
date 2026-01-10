@@ -31,8 +31,7 @@ return [
         'http://ardi.local:3000',
         'http://192.182.6.107:3000',
         'http://localhost:3001',
-        'https://doug-cartoon-processes-turner.trycloudflare.com'
-
+        'https://berlin-instances-parcel-sig.trycloudflare.com'
     ],
 
     /*

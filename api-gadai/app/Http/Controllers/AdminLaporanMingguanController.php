@@ -5,10 +5,19 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use App\Models\DetailGadai;
+use App\Models\Pelelangan;
+use App\Services\PelunasanService;
 use Illuminate\Support\Facades\DB;
 
 class AdminLaporanMingguanController extends Controller
 {
+
+    protected $pelunasanService;
+
+    public function __construct(PelunasanService $pelunasanService)
+    {
+        $this->pelunasanService = $pelunasanService;
+    }
 
 public function cetakLaporanMingguan(Request $request)
 {
@@ -281,60 +290,45 @@ public function rekapPelunasanMingguan(Request $request)
         $startDate = $request->query('tanggal_mulai');
         $endDate = $request->query('tanggal_selesai');
 
-        // Gunakan DetailGadai dan relasi perpanjanganTempos (sesuai Model kamu)
+        if (!$startDate || !$endDate) {
+            return response()->json(['success' => false, 'message' => 'Parameter tanggal wajib diisi.'], 400);
+        }
+
+        // TARIK SEMUA RELASI BARANG
         $data = DetailGadai::with([
             'nasabah.user', 
             'type', 
             'hp.merk', 
-            'hp.type_hp',
-            'perhiasan',
-            'perpanjanganTempos' // Pakai CamelCase sesuai Model!
+            'hp.type_hp', 
+            'perhiasan',    
+            'logamMulia',   
+            'retro',        
+            'perpanjangan_tempos'
         ])
         ->where('status', 'lunas')
-        ->whereBetween('tanggal_bayar', [$startDate, $endDate])
+        ->whereBetween('tanggal_bayar', [
+            \Carbon\Carbon::parse($startDate)->startOfDay(), 
+            \Carbon\Carbon::parse($endDate)->endOfDay()
+        ])
         ->whereNull('deleted_at')
-        ->orderBy('tanggal_bayar', 'asc')
         ->get();
 
         $formattedData = $data->map(function ($item) {
             $pokok = (float) $item->uang_pinjaman;
-            $typeLower = strtolower($item->type->nama_type ?? '');
-            $isHp = in_array($typeLower, ['handphone', 'hp', 'elektronik']);
-
-            // 1. Cari Jatuh Tempo Terakhir pakai relasi perpanjanganTempos
-            $perpanjanganTerakhir = $item->perpanjanganTempos->last();
-            $jatuhTempoTerakhir = $perpanjanganTerakhir 
-                ? $perpanjanganTerakhir->jatuh_tempo_baru 
-                : $item->jatuh_tempo;
-
-            // 2. Hitung Telat (Tanggal Bayar vs Jatuh Tempo Terakhir)
-            $tglBayar = Carbon::parse($item->tanggal_bayar);
-            $jtDate = Carbon::parse($jatuhTempoTerakhir);
+            $totalBayar = (float) $item->nominal_bayar;
             
-            // diffInDays menghasilkan selisih hari
-            $selisihHari = (int) $jtDate->diffInDays($tglBayar, false);
-            
-            // Logic toleransi 1 hari: telat 1 hari masih dianggap 0 (sesuai request)
-            $hariDenda = ($selisihHari <= 1) ? 0 : $selisihHari - 1;
+            $hariTelat = $this->calculateLateDays($item);
+            $penalty = ($hariTelat > 15) ? 180000 : 0;
+            $dendaFinal = $totalBayar - $pokok - $penalty;
 
-            // 3. Hitung Denda & Penalty
-            $persenDenda = $isHp ? 0.003 : 0.001;
-            $denda = $pokok * $persenDenda * $hariDenda;
-            $penalty = ($hariDenda > 15) ? 180000 : 0;
-
-            // 4. Pembulatan (Ceil ke 1000 terdekat)
-            $totalSblmBulat = $pokok + $denda + $penalty;
-            $totalBayar = ceil($totalSblmBulat / 1000) * 1000;
-            $pembulatan = $totalBayar - $totalSblmBulat;
-
-            // Tempelkan data perhitungan supaya FE gampang manggilnya
-            $item->kalkulasi_pelunasan = [
-                'jatuh_tempo_terakhir' => $jatuhTempoTerakhir,
-                'hari_telat' => $hariDenda,
-                'denda' => $denda,
-                'penalty' => $penalty,
-                'pembulatan' => $pembulatan,
-                'total_bayar' => $totalBayar
+            $item->kalkulasi_rekap = [
+                'pokok'          => $pokok,
+                'hari_telat'     => $hariTelat,
+                'denda'          => $dendaFinal, 
+                'penalty'        => $penalty,
+                'total_bayar'    => $totalBayar,
+                'metode'         => strtoupper($item->metode_pembayaran ?? 'CASH'),
+                'tanggal_lunas'  => \Carbon\Carbon::parse($item->tanggal_bayar)->format('d-m-Y H:i')
             ];
 
             return $item;
@@ -343,16 +337,144 @@ public function rekapPelunasanMingguan(Request $request)
         return response()->json([
             'success' => true,
             'metadata' => [
-                'periode' => Carbon::parse($startDate)->format('d/m/Y') . " - " . Carbon::parse($endDate)->format('d/m/Y'),
-                'total_transaksi' => $formattedData->count()
+                'periode' => \Carbon\Carbon::parse($startDate)->format('d/m/Y') . " - " . \Carbon\Carbon::parse($endDate)->format('d/m/Y'),
+                'total_transaksi' => $formattedData->count(),
+                'total_uang_masuk' => (float)$formattedData->sum('nominal_bayar')
             ],
             'data' => $formattedData
         ]);
 
     } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 500);
+    }
+}
+
+
+private function calculateLateDays($gadai) {
+    $perpanjanganTerbaru = $gadai->perpanjangan_tempos->last();
+    $jatuhTempo = $perpanjanganTerbaru ? $perpanjanganTerbaru->jatuh_tempo_baru : $gadai->jatuh_tempo;
+    
+    $tglBayar = \Carbon\Carbon::parse($gadai->tanggal_bayar);
+    $jtDate = \Carbon\Carbon::parse($jatuhTempo);
+
+    $selisihHari = $tglBayar->diffInDays($jtDate, false);
+
+    if ($selisihHari >= -1) {
+        return 0;
+    } else {
+        return abs($selisihHari) - 1;
+    }
+}
+
+
+public function rekapBulananPelelangan(Request $request)
+{
+    try {
+        // SET BAHASA KE INDONESIA (PENTING: Agar output 'Sabtu', 'Januari', dll)
+        \Carbon\Carbon::setLocale('id');
+
+        // 1. Logic Filter: Mendukung filter bulanan atau rentang tanggal
+        if ($request->has('tanggal_mulai') && $request->has('tanggal_selesai')) {
+            $startDate = Carbon::parse($request->get('tanggal_mulai'))->startOfDay()->toDateTimeString();
+            $endDate = Carbon::parse($request->get('tanggal_selesai'))->endOfDay()->toDateTimeString();
+            $periodeLabel = Carbon::parse($startDate)->translatedFormat('d F Y') . ' - ' . Carbon::parse($endDate)->translatedFormat('d F Y');
+        } else {
+            $bulanInput = $request->get('bulan') ?? Carbon::today()->format('Y-m');
+            $startDate = Carbon::parse($bulanInput)->startOfMonth()->toDateTimeString();
+            $endDate = Carbon::parse($bulanInput)->endOfMonth()->endOfDay()->toDateTimeString();
+            $periodeLabel = Carbon::parse($bulanInput)->translatedFormat('F Y');
+        }
+
+        // 2. Ambil data dengan Eager Loading relasi
+        $dataLelang = Pelelangan::with([
+            'detailGadai.nasabah', 
+            'detailGadai.type',
+            'detailGadai.hp.merk', 
+            'detailGadai.hp.type_hp', 
+            'detailGadai.perhiasan',
+            'detailGadai.logamMulia', 
+            'detailGadai.retro'
+        ])
+        ->whereBetween('waktu_bayar', [$startDate, $endDate])
+        ->whereIn('status_lelang', ['terlelang', 'lunas'])
+        ->orderBy('waktu_bayar', 'asc')
+        ->get();
+
+        $laporanTabel = [];
+        $totalModalKembali = 0;
+        $totalKeuntunganLelang = 0;
+        $totalPenerimaanDitebus = 0;
+
+        $controllerLelang = new PelelanganController();
+
+        foreach ($dataLelang as $item) {
+            // Proteksi: Jika data detail gadai hilang, skip
+            if (!$item->detailGadai) continue;
+
+            $status = strtolower($item->status_lelang);
+            
+            // Ambil Kalkulasi (Bunga, Denda, dll) dari Logic Controller Utama
+            $kalkulasi = $controllerLelang->hitungKalkulasi($item->detailGadai, $item->waktu_bayar);
+
+            // Format data untuk dikirim ke React
+            $laporanTabel[] = [
+                // translatedFormat('l') akan menghasilkan: Sabtu, Minggu, Senin, dst.
+                'tanggal' => Carbon::parse($item->waktu_bayar)->translatedFormat('l, d F Y'),
+                'waktu' => Carbon::parse($item->waktu_bayar)->format('H:i'),
+                'label_waktu' => ($status === 'lunas') ? 'Waktu Pelunasan' : 'Waktu Terlelang',
+                
+                'no_gadai' => $item->detailGadai->no_gadai ?? '-',
+                'nama_nasabah' => $item->detailGadai->nasabah->nama_lengkap ?? '-',
+                'status' => strtoupper($status),
+                
+                // Data barang untuk FE (HP/Emas)
+                'detail_full' => $item->detailGadai, 
+                
+                // Detail Biaya
+                'kalkulasi_full' => [
+                    'bunga' => (float) ($kalkulasi['bunga'] ?? 0),
+                    'denda' => (float) ($kalkulasi['denda'] ?? 0),
+                    'penalty' => (float) ($kalkulasi['penalty'] ?? 0),
+                    'hari_terlambat' => $kalkulasi['hari_terlambat'] ?? 0,
+                    'total_hutang' => (float) ($kalkulasi['total_hutang'] ?? 0),
+                ],
+                
+                'hutang_sistem' => (float) ($kalkulasi['total_hutang'] ?? 0),
+                'nominal_masuk' => (float) $item->nominal_diterima,
+                'profit_lelang' => (float) $item->keuntungan_lelang,
+            ];
+
+            // 3. Akumulasi Summary
+            if ($status === 'lunas') {
+                $totalPenerimaanDitebus += (float) $item->nominal_diterima;
+            } else {
+                // Sesuai flow: Terlelang mengembalikan modal (hutang sistem) + untung lelang
+                $totalModalKembali += (float) ($kalkulasi['total_hutang'] ?? 0);
+                $totalKeuntunganLelang += (float) $item->keuntungan_lelang;
+            }
+        }
+
         return response()->json([
-            'success' => false, 
-            'message' => 'Error Braqder: ' . $e->getMessage()
+            'success' => true,
+            'metadata' => [
+                'judul' => 'Laporan Rekap Pelelangan & Pelunasan',
+                'periode' => $periodeLabel,
+                'total_data' => count($laporanTabel),
+                'generated_at' => now()->translatedFormat('d F Y H:i')
+            ],
+            'data_tabel' => $laporanTabel,
+            'summary' => [
+                'total_ditebus_nasabah' => $totalPenerimaanDitebus, 
+                'total_modal_lelang_kembali' => $totalModalKembali,  
+                'total_keuntungan_murni_lelang' => $totalKeuntunganLelang, 
+                'grand_total_kas_masuk' => $totalPenerimaanDitebus + $totalModalKembali + $totalKeuntunganLelang
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Error Laporan: ' . $e->getMessage() . ' di baris ' . $e->getLine()
         ], 500);
     }
 }
