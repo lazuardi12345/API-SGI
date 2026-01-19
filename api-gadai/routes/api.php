@@ -56,14 +56,11 @@ Route::get('/test-lunas', function () {
     return "Notif Lunas terkirim!";
 });
 
-Route::middleware('auth:sanctum')->post('/logout', function (Request $request) {
-    $request->user()->currentAccessToken()->delete();
-    return response()->json(['message' => 'Logged out successfully']);
-});
+Route::middleware('auth:api')->post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
 
 // ================== PETUGAS ================== //
 // hanya GET (index/show) dan POST (store)
-Route::middleware(['auth:sanctum', 'role:petugas'])->group(function () {
+Route::middleware(['auth:api', 'role:petugas'])->group(function () {
     Route::apiResource('petugas/data-nasabah', DataNasabahController::class);
     Route::apiResource('petugas/type', TypeController::class)->only(['index', 'show', 'store']);
     Route::apiResource('petugas/detail-gadai', DetailGadaiController::class)->only(['index', 'show', 'store']);
@@ -117,7 +114,7 @@ Route::middleware(['auth:sanctum', 'role:petugas'])->group(function () {
 
 // ================== HM + CHECKER ================== //
 // semua method boleh
-Route::middleware(['auth:sanctum', 'role:hm'])->group(function () {
+Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::apiResource('data-nasabah', DataNasabahController::class);
     Route::apiResource('type', TypeController::class);
     Route::apiResource('detail-gadai', DetailGadaiController::class);
@@ -223,7 +220,7 @@ Route::middleware(['auth:sanctum', 'role:hm'])->group(function () {
 
 
 //CHECKER
-Route::middleware(['auth:sanctum', 'role:checker'])->group(function () {
+Route::middleware(['auth:api', 'role:checker'])->group(function () {
     Route::apiResource('checker/data-nasabah', DataNasabahController::class);
     Route::apiResource('checker/type', TypeController::class);
     Route::apiResource('checker/detail-gadai', DetailGadaiController::class);
@@ -307,7 +304,7 @@ Route::middleware(['auth:sanctum', 'role:checker'])->group(function () {
 
 
 
-Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+Route::middleware(['auth:api', 'role:admin'])->group(function () {
     Route::apiResource('admin/data-nasabah', DataNasabahController::class);
     Route::apiResource('admin/type', TypeController::class);
     Route::apiResource('admin/detail-gadai', DetailGadaiController::class);

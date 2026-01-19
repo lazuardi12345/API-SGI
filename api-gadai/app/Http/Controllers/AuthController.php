@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
@@ -28,7 +29,7 @@ class AuthController extends Controller
             'role'     => $request->role,
         ]);
 
-        $token = $user->createToken('api-token')->plainTextToken;
+        $token = JWTAuth::fromUser($user);
 
         return response()->json([
             'success' => true,
@@ -60,11 +61,8 @@ class AuthController extends Controller
             ], 401);
         }
 
-        // hapus semua token lama (opsional)
-        $user->tokens()->delete();
-
         // buat token baru
-        $token = $user->createToken('api-token')->plainTextToken;
+        $token = JWTAuth::fromUser($user);
 
         return response()->json([
             'success' => true,
@@ -82,20 +80,18 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        $user = $request->user();
-
-        if ($user && $user->currentAccessToken()) {
-            $user->currentAccessToken()->delete();
+        try {
+            JWTAuth::invalidate(JWTAuth::getToken());
 
             return response()->json([
                 'success' => true,
                 'message' => 'Logout berhasil.'
             ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Token tidak ditemukan atau sudah logout.'
+            ], 401);
         }
-
-        return response()->json([
-            'success' => false,
-            'message' => 'Token tidak ditemukan atau sudah logout.'
-        ], 401);
     }
 }
