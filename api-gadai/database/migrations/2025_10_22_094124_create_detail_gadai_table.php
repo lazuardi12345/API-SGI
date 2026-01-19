@@ -21,7 +21,6 @@ return new class extends Migration
             $table->decimal(column: 'uang_pinjaman', total: 15, places: 2);
             $table->enum('status', ['proses', 'selesai', 'lunas'])->default('proses');
             
-            // 🔹 FIELD BARU: Approval SBG Online
             $table->enum('approval_status', ['draft', 'pending', 'approved', 'rejected'])
                   ->default('draft')
                   ->comment('Status approval SBG untuk ACC online');

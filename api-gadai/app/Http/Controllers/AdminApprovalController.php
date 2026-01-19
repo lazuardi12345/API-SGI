@@ -127,14 +127,20 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
 
 public function index(Request $request)
 {
-    $statusFilter = $request->get('status');
+    // Default filter hanya menampilkan yang 'lunas'
+    $statusFilter = $request->get('status', 'lunas'); 
 
     $query = DetailGadai::with([
-        'nasabah', 'type', 'approvals'
+        'nasabah', 
+        'type', 
+        'approvals',
+        'hp.type_hp.hargaTerbaru', 
+        'perhiasan', 
+        'logamMulia', 
+        'retro'
     ]);
 
-    // Logika Filter Status Spesifik sesuai alur: proses, selesai, lunas
-    if ($statusFilter && $statusFilter !== 'all') {
+    if ($statusFilter !== 'all') {
         $query->where('status', $statusFilter);
     }
 
@@ -142,53 +148,91 @@ public function index(Request $request)
 
     $result = $data->map(function ($d) {
         $kalkulasi = $this->hitungKalkulasi($d);
+        $hargaBarangMaster = 0;
+
+        if ($d->hp && $d->hp->type_hp && $d->hp->type_hp->hargaTerbaru) {
+            $hargaBarangMaster = $d->hp->type_hp->hargaTerbaru->harga_barang;
+        } else {
+            $hargaBarangMaster = 0;
+        }
 
         $status_checker = $d->approvals->where('role', 'checker')->sortByDesc('created_at')->first()->status ?? "-";
         $status_hm = $d->approvals->where('role', 'hm')->sortByDesc('created_at')->first()->status ?? "-";
+        $totalHutang = (strtolower($d->status) === 'lunas') 
+            ? (float) $d->nominal_bayar 
+            : (float) ($kalkulasi['total_hutang'] ?? 0);
 
         return [
             'id' => $d->id,
             'no_gadai' => $d->no_gadai,
             'nama_nasabah' => $d->nasabah->nama_lengkap ?? "-",
             'status' => $d->status, 
-            'pinjaman_pokok' => $d->uang_pinjaman,
             'type' => $d->type->nama_type ?? "-",
-            'tenor_pilihan' => $kalkulasi['tenor_pilihan'], 
-            'hari_terlambat' => $kalkulasi['hari_terlambat'],  
-            'total_hutang' => $kalkulasi['total_hutang'],
-            'denda' => $kalkulasi['denda'],
-            'acc_checker' => $status_checker,
-            'acc_hm' => $status_hm,
-            'jatuh_tempo' => $kalkulasi['jatuh_tempo']
+            'harga_barang'   => (float) $hargaBarangMaster,  
+            'taksiran'       => (float) $d->taksiran,        
+            'pinjaman_pokok' => (float) $d->uang_pinjaman,   
+
+            'tenor_pilihan'  => $kalkulasi['tenor_pilihan'] ?? "-", 
+            'hari_terlambat' => $kalkulasi['hari_terlambat'] ?? 0,  
+            'total_hutang'   => $totalHutang,
+            'denda'          => (float) ($kalkulasi['denda'] ?? 0),
+            'acc_checker'    => $status_checker,
+            'acc_hm'         => $status_hm,
+            'jatuh_tempo'    => $d->jatuh_tempo
         ];
     });
 
     return response()->json([
         'success' => true,
-        'message' => 'Data laporan admin.',
+        'message' => 'Laporan Admin - Status: ' . $statusFilter,
         'data' => $result
     ]);
 }
 
-    public function detailAdmin($detailGadaiId, Request $request)
-    {
-        $detail = DetailGadai::with([
-            'nasabah', 'type', 'approvals.user', 'perpanjanganTempos',
-            'hp.merk', 'hp.type_hp', 'hp.grade', 'hp.kerusakanList', 'hp.kelengkapanList', 'hp.dokumenPendukungHp'
-        ])->findOrFail($detailGadaiId);
+public function detailAdmin($detailGadaiId, Request $request)
+{
+    $detail = DetailGadai::with([
+        'nasabah', 
+        'type', 
+        'approvals.user', 
+        'perpanjanganTempos',
+        'hp.merk', 'hp.type_hp', 'hp.grade', 'hp.kerusakanList', 'hp.kelengkapanList', 'hp.dokumenPendukungHp',
+        'perhiasan.kelengkapan', 'perhiasan.dokumenPendukung',
+        'logamMulia.kelengkapanEmas', 'logamMulia.dokumenPendukung',
+        'retro.kelengkapan', 'retro.dokumenPendukung'
+    ])->findOrFail($detailGadaiId);
 
-        $kalkulasi = $this->hitungKalkulasi($detail);
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'detail_gadai' => $detail,
-                'perhitungan_awal' => [
-                    'tenor_hari' => $kalkulasi['tenor_pilihan'], 
-                    'pinjaman' => $detail->uang_pinjaman,
-                ],
-                'perhitungan_keterlambatan' => $kalkulasi 
-            ]
-        ]);
+    $relasiEmas = ['perhiasan', 'logamMulia', 'retro'];
+
+    foreach ($relasiEmas as $rel) {
+        if ($detail->$rel && $detail->$rel->dokumenPendukung) {
+            $dokumen = $detail->$rel->dokumenPendukung;
+            $converted = [];
+            
+            foreach ($dokumen->getAttributes() as $key => $path) {
+
+                if (!in_array($key, ['id', 'emas_type', 'emas_id', 'created_at', 'updated_at']) && $path) {
+                    $converted[$key] = url("api/files/{$path}");
+                }
+            }
+
+            $detail->$rel->setAttribute('url_dokumen', $converted);
+        }
     }
+
+    $kalkulasi = $this->hitungKalkulasi($detail);
+
+    return response()->json([
+        'success' => true,
+        'data' => [
+            'detail_gadai' => $detail,
+            'perhitungan_awal' => [
+                'tenor_hari' => $kalkulasi['tenor_pilihan'], 
+                'pinjaman' => $detail->uang_pinjaman,
+            ],
+            'perhitungan_keterlambatan' => $kalkulasi 
+        ]
+    ]);
+}
 }

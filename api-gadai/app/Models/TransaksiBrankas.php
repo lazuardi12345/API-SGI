@@ -26,6 +26,8 @@ class TransaksiBrankas extends Model
         'bukti_transaksi', 
         'status_validasi', 
         'validator_id',    
+        'bukti_validasi', 
+        'catatan_admin',
     ];
     public function user()
     {

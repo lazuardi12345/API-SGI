@@ -324,16 +324,11 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
 public function brankasDashboard()
 {
     try {
-        // 1. Ambil transaksi paling terakhir untuk saldo riil (Cash & Rekening)
         $terakhir = DB::table('transaksi_brankas')
             ->orderBy('id', 'desc')
             ->first();
-
-        // 2. Info Waktu
         $bulanSekarang = now()->month;
         $tahunSekarang = now()->year;
-
-        // 3. Hitung Modal & Setoran (Logika dari fungsi index)
         $totalModalPusat = (float) DB::table('transaksi_brankas')
             ->where('kategori', 'topup_pusat')
             ->sum('pemasukan');
@@ -347,8 +342,6 @@ public function brankasDashboard()
             ->where('kategori', 'setor_ke_admin')
             ->where('status_validasi', 'pending')
             ->sum('pengeluaran');
-
-        // 4. Hitung Mutasi Khusus Bulan Ini (Pemasukan & Pengeluaran)
         $totalMasukBulanan = DB::table('transaksi_brankas')
             ->whereMonth('created_at', $bulanSekarang)
             ->whereYear('created_at', $tahunSekarang)
@@ -362,16 +355,11 @@ public function brankasDashboard()
         return response()->json([
             'success' => true,
             'summary' => [
-                // Saldo Riil Saat Ini
                 'saldo_toko_saat_ini' => (int) ($terakhir->saldo_akhir ?? 0),
                 'saldo_rekening_saat_ini' => (int) ($terakhir->saldo_akhir_rekening ?? 0),
-                
-                // Akumulasi Modal & Setoran
                 'total_modal_dari_pusat' => (int) $totalModalPusat,
                 'total_setoran_ke_admin' => (int) $totalSetoranTervalidasi,
                 'total_setoran_pending' => (int) $totalSetoranPending,
-                
-                // Mutasi Bulanan (Untuk info tambahan)
                 'total_pemasukan_bulan_ini' => (int) $totalMasukBulanan,
                 'total_pengeluaran_bulan_ini' => (int) $totalKeluarBulanan,
             ],

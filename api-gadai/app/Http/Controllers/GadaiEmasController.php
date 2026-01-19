@@ -34,14 +34,15 @@ class GadaiEmasController extends Controller
             // =========================
             // STEP 1: NASABAH
             // =========================
-            $nasabah = DataNasabah::create([
-                'user_id'      => $user->id,
-                'nama_lengkap' => $nasabahInput['nama_lengkap'] ?? '',
-                'nik'          => $nasabahInput['nik'] ?? '',
-                'alamat'       => $nasabahInput['alamat'] ?? '',
-                'no_hp'        => $nasabahInput['no_hp'] ?? '',
-                'no_rek'       => $nasabahInput['no_rek'] ?? '',
-            ]);
+          $nasabah = DataNasabah::create([
+            'user_id'      => $user->id,
+            'nama_lengkap' => $nasabahInput['nama_lengkap'] ?? '',
+            'nik'          => $nasabahInput['nik'] ?? '',
+            'alamat'       => $nasabahInput['alamat'] ?? '',
+            'no_hp'        => $nasabahInput['no_hp'] ?? '',
+            'bank'         => $nasabahInput['bank'] ?? 'BCA', 
+            'no_rek'  => $nasabahInput['no_rek'] ?? '',
+        ]);
 
             $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
 

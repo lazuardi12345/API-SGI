@@ -36,14 +36,14 @@ public function getByMerk($merkId)
             'id'           => $type->id,
             'id_harga'     => $harga ? $harga->id : null, 
             'nama_type'    => $type->nama_type,
-            'harga_barang' => $harga ? $harga->harga_barang : (int) 0, // Pastikan integer jika null
+            'harga_barang' => $harga ? $harga->harga_barang : (int) 0,
             'has_grade'    => $type->grades_count > 0,
+            'updated_at'   => $harga ? $harga->updated_at : null, 
         ];
     });
 
     return response()->json(['success' => true, 'data' => $data]);
 }
-
 
     public function store(Request $request)
     {

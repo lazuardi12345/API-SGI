@@ -34,6 +34,8 @@ use App\Http\Controllers\LaporanHarianCheckerController;
 use App\Http\Controllers\PetugasLaporanController;
 use App\Http\Controllers\AdminLaporanMingguanController;
 use App\Http\Controllers\PelunasanController;
+
+use App\Events\TransaksiBaru;
 // ================== AUTH ================== //
 Route::post('/register', [AuthController::class, 'register'])->name('auth.register');
 Route::post('/login', [AuthController::class, 'login'])->name('auth.login');
@@ -43,6 +45,16 @@ Route::get('/v1/verify-sbg/{no_gadai}', [DetailGadaiController::class, 'publicVe
 Route::get('/files/{path}', [App\Http\Controllers\StorageController::class, 'get'])
     ->where('path', '.*')
     ->name('storage.get');
+
+    Route::get('/test-notif', function () {
+    event(new TransaksiBaru("Ini tes notifikasi Selesai", "Selesai", "SGI-TEST-001"));
+    return "Notif Selesai terkirim!";
+});
+
+Route::get('/test-lunas', function () {
+    event(new TransaksiBaru("Ini tes notifikasi Lunas", "Lunas", "SGI-TEST-002"));
+    return "Notif Lunas terkirim!";
+});
 
 Route::middleware('auth:sanctum')->post('/logout', function (Request $request) {
     $request->user()->currentAccessToken()->delete();

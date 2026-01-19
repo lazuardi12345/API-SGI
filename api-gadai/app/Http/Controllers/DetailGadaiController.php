@@ -160,7 +160,8 @@ private function calculateLateDays($item)
 
 public function pelunasan(Request $request, $id)
 {
-    $gadai = DetailGadai::with(['nasabah', 'type', 'perpanjangan_tempos'])->find($id);
+    // Gunakan findOrFail atau handle null secara eksplisit
+    $gadai = DetailGadai::with(['nasabah', 'type'])->find($id);
 
     if (!$gadai) {
         return response()->json([
@@ -183,15 +184,17 @@ public function pelunasan(Request $request, $id)
             'message' => 'Gadai sudah lunas sebelumnya'
         ], 400);
     }
+
     $pelunasanService = new \App\Services\PelunasanService();
     $perhitungan = $pelunasanService->hitungPelunasan($gadai);
+    $totalHarusDibayar = (float) $perhitungan['total_bayar'];
 
     $validator = Validator::make($request->all(), [
-        'nominal_bayar'     => 'required|numeric|min:' . $perhitungan['total_bayar'],
+        'nominal_bayar'     => 'required|numeric|min:' . $totalHarusDibayar,
         'metode_pembayaran' => 'required|in:cash,transfer',
         'bukti_transfer'    => 'required_if:metode_pembayaran,transfer|nullable|image|max:2048',
     ], [
-        'nominal_bayar.min' => 'Nominal bayar minimal Rp. ' . number_format($perhitungan['total_bayar'], 0, ',', '.'),
+        'nominal_bayar.min' => 'Nominal bayar minimal Rp. ' . number_format($totalHarusDibayar, 0, ',', '.'),
     ]);
 
     if ($validator->fails()) {
@@ -204,14 +207,14 @@ public function pelunasan(Request $request, $id)
 
     DB::beginTransaction();
     try {
-        // Kita simpan TOTAL BAYAR yang sudah dibulatkan ke kolom nominal_bayar
         $updateData = [
             'status'            => 'lunas',
-            'nominal_bayar'     => $perhitungan['total_bayar'], 
+            'nominal_bayar'     => $totalHarusDibayar, 
             'metode_pembayaran' => $request->metode_pembayaran,
             'tanggal_bayar'     => now(),
         ];
 
+        // Handle Upload Bukti Transfer
         if ($request->metode_pembayaran === 'transfer' && $request->hasFile('bukti_transfer')) {
             $nasabah = $gadai->nasabah;
             $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap ?? 'unknown');
@@ -228,26 +231,28 @@ public function pelunasan(Request $request, $id)
 
         DB::commit();
 
-        $kembalian = (float)$request->nominal_bayar - (float)$perhitungan['total_bayar'];
+        // Kalkulasi kembalian setelah commit sukses
+        $nominalDiterima = (float)$request->nominal_bayar;
+        $kembalian = $nominalDiterima - $totalHarusDibayar;
 
-       return response()->json([
-    'success'   => true,
-    'message'   => 'Pelunasan berhasil diselesaikan.',
-    'data' => [
-        'detail_gadai' => array_merge($gadai->fresh(['nasabah', 'type'])->toArray(), [
-            'perhitungan' => $perhitungan,
-            'hari_keterlambatan' => $perhitungan['hari_terlambat'] // Gunakan data murni dari service
-        ]),
-        'nominal_dibayar' => (float)$request->nominal_bayar,
-        'kembalian' => $kembalian > 0 ? $kembalian : 0,
-    ]
-]);
+        return response()->json([
+            'success'   => true,
+            'message'   => 'Pelunasan berhasil diselesaikan.',
+            'data' => [
+                'id'              => $gadai->id,
+                'no_gadai'        => $gadai->no_gadai,
+                'perhitungan'     => $perhitungan,
+                'nominal_dibayar' => $nominalDiterima,
+                'kembalian'       => $kembalian > 0 ? $kembalian : 0,
+            ]
+        ]);
 
     } catch (\Exception $e) {
         DB::rollBack();
+        \Log::error("Error Pelunasan ID {$id}: " . $e->getMessage());
         return response()->json([
             'success' => false,
-            'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage()
         ], 500);
     }
 }

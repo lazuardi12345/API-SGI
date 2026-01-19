@@ -19,37 +19,47 @@ class DataNasabah extends Model
         'alamat',
         'foto_ktp',
         'no_hp',
-        'no_rek',
+        'bank',        
+        'no_rek', 
     ];
 
+    /**
+     * Relasi ke User (Petugas yang input)
+     */
     public function user()
     {
         return $this->belongsTo(User::class, 'user_id');
     }
 
-
-        public function detailGadai()
+    /**
+     * Relasi ke banyak transaksi Gadai
+     */
+    public function detailGadai()
     {
         return $this->hasMany(DetailGadai::class, 'nasabah_id', 'id');
     }
 
     /**
-     * Override accessor foto_ktp supaya langsung jadi URL backend streaming
+     * Accessor Foto KTP
      */
     public function getFotoKtpAttribute($value)
     {
         if (!$value) return null;
-
- 
         if (str_starts_with($value, 'http')) return $value;
 
-        // Sanitasi path
         $path = ltrim($value, '/');
         $path = str_replace('..', '', $path);
-
-        // URL backend streaming
         $appUrl = rtrim(env('APP_URL'), '/');
 
         return "{$appUrl}/api/files/{$path}";
+    }
+
+    /**
+     * Helper untuk menampilkan Nama Bank yang rapi (Opsional)
+     * Contoh: SEABANK -> SeaBank, BANK_JAGO -> Bank Jago
+     */
+    public function getNamaBankFormattedAttribute()
+    {
+        return str_replace('_', ' ', ucwords(strtolower($this->bank)));
     }
 }

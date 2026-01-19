@@ -47,15 +47,15 @@ class GadaiWizardController extends Controller
             $barangInput  = $request->input('barang', []);
 
             // STEP 1: SIMPAN NASABAH + FOTO KTP
-            $nasabahData = [
-                'user_id'      => $user->id,
-                'nama_lengkap' => $nasabahInput['nama_lengkap'],
-                'nik'          => $nasabahInput['nik'],
-                'alamat'       => $nasabahInput['alamat'] ?? '',
-                'no_hp'        => $nasabahInput['no_hp'] ?? '',
-                'no_rek'       => $nasabahInput['no_rek'] ?? '',
-            ];
-
+           $nasabahData = [
+    'user_id'      => $user->id,
+    'nama_lengkap' => $nasabahInput['nama_lengkap'],
+    'nik'          => $nasabahInput['nik'],
+    'alamat'       => $nasabahInput['alamat'] ?? '',
+    'no_hp'        => $nasabahInput['no_hp'] ?? '',
+    'bank'         => $nasabahInput['bank'] ?? 'BCA', 
+    'no_rek'  => $nasabahInput['no_rek'] ?? '',
+];
             $nasabah = DataNasabah::create($nasabahData);
 
             // Upload Foto KTP

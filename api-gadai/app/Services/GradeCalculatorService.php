@@ -4,7 +4,6 @@ namespace App\Services;
 
 class GradeCalculatorService
 {
-    // Biaya tambahan tetap untuk setiap grade
     const ADDITIONAL_FEE = 15000;
 
     const PRICE_TIERS = [
@@ -17,46 +16,47 @@ class GradeCalculatorService
         ['min' => 15000000, 'max' => PHP_INT_MAX, 'adjustment' => 300000],
     ];
 
-    /**
-     * Menghitung semua Grade dan Taksiran
-     */
     public function calculateAllGrades(int $hargaBarang, string $pasarTrend = 'turun'): array
     {
-        // --- 1. GRADE A DUS (BASE) ---
-        // Hitung harga dasar, bulatkan, lalu tambah 15rb
+        // 1. GRADE A DUS (BASE)
+        // SOP: (Harga - 20%) +/- Adjustment
         $baseGradeA = $this->calculateGradeABase($hargaBarang, $pasarTrend);
         $gradeADus = $baseGradeA + self::ADDITIONAL_FEE;
-        $taksiranADus = $this->calculateTaksiran($gradeADus);
 
-        // --- 2. GRADE A TANPA DUS ---
-        // (Grade A Base - 15%) + 15rb
-        $gradeATanpaDus = $this->roundPrice($baseGradeA * 0.85) + self::ADDITIONAL_FEE;
-        $taksiranATanpaDus = $this->calculateTaksiran($gradeATanpaDus);
+        // 2. GRADE A TANPA DUS
+        // SOP: Grade A - 15%
+        $baseGradeATanpaDus = $this->roundPrice($baseGradeA * 0.85);
+        // Validasi: Tidak boleh lebih dari Grade A
+        if ($baseGradeATanpaDus >= $baseGradeA) $baseGradeATanpaDus = $baseGradeA - 50000;
+        $gradeATanpaDus = $baseGradeATanpaDus + self::ADDITIONAL_FEE;
 
-        // --- 3. GRADE B DUS ---
-        // ((Grade A Base - 10%) + 50rb) + 15rb
-        $baseGradeB = $this->roundPrice(($baseGradeA * 0.90) + 50000);
-        $gradeBDus = $baseGradeB + self::ADDITIONAL_FEE;
-        $taksiranBDus = $this->calculateTaksiran($gradeBDus);
+        // 3. GRADE B DUS
+        // SOP: (Grade A - 10%) + 50.000
+        $baseGradeBDus = $this->roundPrice(($baseGradeA * 0.90) + 50000);
+        // Validasi Krusial: Grade B tidak boleh >= Grade A
+        if ($baseGradeBDus >= $baseGradeA) {
+            $baseGradeBDus = $baseGradeA - 50000;
+        }
+        $gradeBDus = $baseGradeBDus + self::ADDITIONAL_FEE;
 
-        // --- 4. GRADE B TANPA DUS ---
-        // (Grade B Base - 20%) + 15rb
-        $gradeBTanpaDus = $this->roundPrice($baseGradeB * 0.80) + self::ADDITIONAL_FEE;
-        $taksiranBTanpaDus = $this->calculateTaksiran($gradeBTanpaDus);
+        // 4. GRADE B TANPA DUS
+        // SOP: Grade B - 20%
+        $baseGradeBTanpaDus = $this->roundPrice($baseGradeBDus * 0.80);
+        $gradeBTanpaDus = $baseGradeBTanpaDus + self::ADDITIONAL_FEE;
 
-        // --- 5. GRADE C DUS ---
-        // (Grade B Base - 10%) + 15rb
-        $baseGradeC = $this->roundPrice($baseGradeB * 0.90);
-        $gradeCDus = $baseGradeC + self::ADDITIONAL_FEE;
-        $taksiranCDus = $this->calculateTaksiran($gradeCDus);
+        // 5. GRADE C DUS
+        // SOP: Grade B - 10%
+        $baseGradeCDus = $this->roundPrice($baseGradeBDus * 0.90);
+        // Validasi: Grade C harus di bawah Grade B
+        if ($baseGradeCDus >= $baseGradeBDus) $baseGradeCDus = $baseGradeBDus - 50000;
+        $gradeCDus = $baseGradeCDus + self::ADDITIONAL_FEE;
 
-        // --- 6. GRADE C TANPA DUS ---
-        // (Grade C Base - 25%) + 15rb
-        $gradeCTanpaDus = $this->roundPrice($baseGradeC * 0.75) + self::ADDITIONAL_FEE;
-        $taksiranCTanpaDus = $this->calculateTaksiran($gradeCTanpaDus);
+        // 6. GRADE C TANPA DUS
+        // SOP: Grade C - 25%
+        $baseGradeCTanpaDus = $this->roundPrice($baseGradeCDus * 0.75);
+        $gradeCTanpaDus = $baseGradeCTanpaDus + self::ADDITIONAL_FEE;
 
         return [
-            // Nilai Pinjaman (Grade)
             'grade_a_dus' => $gradeADus,
             'grade_a_tanpa_dus' => $gradeATanpaDus,
             'grade_b_dus' => $gradeBDus,
@@ -64,43 +64,28 @@ class GradeCalculatorService
             'grade_c_dus' => $gradeCDus,
             'grade_c_tanpa_dus' => $gradeCTanpaDus,
             
-            // Nilai Taksiran (Grade + 10%)
-            'taksiran_a_dus' => $taksiranADus,
-            'taksiran_a_tanpa_dus' => $taksiranATanpaDus,
-            'taksiran_b_dus' => $taksiranBDus,
-            'taksiran_b_tanpa_dus' => $taksiranBTanpaDus,
-            'taksiran_c_dus' => $taksiranCDus,
-            'taksiran_c_tanpa_dus' => $taksiranCTanpaDus,
+            'taksiran_a_dus' => $this->calculateTaksiran($gradeADus),
+            'taksiran_a_tanpa_dus' => $this->calculateTaksiran($gradeATanpaDus),
+            'taksiran_b_dus' => $this->calculateTaksiran($gradeBDus),
+            'taksiran_b_tanpa_dus' => $this->calculateTaksiran($gradeBTanpaDus),
+            'taksiran_c_dus' => $this->calculateTaksiran($gradeCDus),
+            'taksiran_c_tanpa_dus' => $this->calculateTaksiran($gradeCTanpaDus),
         ];
     }
 
-    /**
-     * Hitung Grade A Awal (80% Harga Barang +/- Adjustment)
-     */
     private function calculateGradeABase(int $hargaBarang, string $pasarTrend): int
     {
         $basePrice = $hargaBarang * 0.80;
         $adjustment = $this->getAdjustment($hargaBarang);
-        
-        $finalPrice = ($pasarTrend === 'naik') 
-            ? $basePrice + $adjustment 
-            : $basePrice - $adjustment;
-        
+        $finalPrice = ($pasarTrend === 'naik') ? ($basePrice + $adjustment) : ($basePrice - $adjustment);
         return $this->roundPrice($finalPrice);
     }
 
-    /**
-     * Rumus Taksiran: (Grade + 10%)
-     */
     private function calculateTaksiran(int $gradePrice): int
     {
-        // Taksiran dihitung dari grade yang sudah termasuk biaya 15rb
         return (int) ($gradePrice * 1.10);
     }
 
-    /**
-     * Mendapatkan nilai penyesuaian berdasarkan tier harga
-     */
     private function getAdjustment(int $hargaBarang): int
     {
         foreach (self::PRICE_TIERS as $tier) {
@@ -108,23 +93,26 @@ class GradeCalculatorService
                 return $tier['adjustment'];
             }
         }
-        return 300000; // Default untuk harga di atas tier tertinggi
+        return 300000;
     }
 
-    /**
-     * Pembulatan harga agar rapi (ke 50rb atau 100rb terdekat)
-     */
-    private function roundPrice(float $price): int
-    {
-        $ratusanRibu = floor($price / 100000) * 100000;
-        $sisa = $price - $ratusanRibu;
+   private function roundPrice(float $price): int
+{
+    if ($price <= 0) return 0;
 
-        if ($sisa < 25000) {
-            return (int) $ratusanRibu;
-        } elseif ($sisa <= 51000) {
-            return (int) ($ratusanRibu + 50000);
-        } else {
-            return (int) ($ratusanRibu + 100000);
-        }
+    $ratusanRibu = floor($price / 100000) * 100000;
+    $sisa = $price - $ratusanRibu;
+
+    if ($sisa <= 12500) {
+        return (int) $ratusanRibu; 
+    } elseif ($sisa <= 37500) {
+        return (int) ($ratusanRibu + 25000);
+    } elseif ($sisa <= 62500) {
+        return (int) ($ratusanRibu + 50000);
+    } elseif ($sisa <= 87500) {
+        return (int) ($ratusanRibu + 75000);
+    } else {
+        return (int) ($ratusanRibu + 100000);
     }
+}
 }
