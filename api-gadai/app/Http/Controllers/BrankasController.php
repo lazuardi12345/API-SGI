@@ -12,10 +12,9 @@ use Carbon\Carbon;
 
 class BrankasController extends Controller
 {
- 
+
 public function index()
 {
-    // Ambil baris terakhir berdasarkan ID terbesar untuk mendapatkan saldo paling update
     $terakhir = TransaksiBrankas::orderBy('id', 'desc')->first();
     
     $saldoToko = (float) ($terakhir->saldo_akhir ?? 0);
@@ -54,7 +53,6 @@ public function index()
 
         DB::beginTransaction();
         try {
-            // Ambil saldo terakhir untuk dibawa ke transaksi baru
             $last = TransaksiBrankas::orderBy('id', 'desc')->lockForUpdate()->first();
             $saldoAwalTunai = $last ? (float)$last->saldo_akhir : 0;
             $saldoAwalBank = $last ? (float)$last->saldo_akhir_rekening : 0;
@@ -72,17 +70,12 @@ public function index()
                 if ($request->tipe_operasional === 'masuk') $p = $request->nominal;
                 else $q = $request->nominal;
             }
-
-            // HITUNG SALDO AKHIR
             $saldoAkhirTunai = $saldoAwalTunai;
-            $saldoAkhirBank = $saldoAwalBank; // Bawa saldo bank sebelumnya agar tidak jadi 0
-
-            // Jika setor ke admin, saldo cash HARUS langsung berkurang (karena uang sudah dilepas)
+            $saldoAkhirBank = $saldoAwalBank; 
             if ($request->kategori === 'setor_ke_admin') {
                 if ($q > $saldoAwalTunai) throw new Exception("Saldo TUNAI tidak mencukupi!");
                 $saldoAkhirTunai = $saldoAwalTunai - $q;
             } 
-            // Jika operasional cash lainnya
             elseif ($request->metode === 'cash') {
                 $saldoAkhirTunai = $saldoAwalTunai + $p - $q;
                 if ($q > $saldoAwalTunai) throw new Exception("Saldo TUNAI tidak mencukupi!");
@@ -98,7 +91,7 @@ public function index()
                 'saldo_awal' => $saldoAwalTunai,
                 'saldo_akhir' => $saldoAkhirTunai,
                 'saldo_awal_rekening' => $saldoAwalBank,
-                'saldo_akhir_rekening' => $saldoAkhirBank, // Simpan saldo bank terakhir (masih tetap)
+                'saldo_akhir_rekening' => $saldoAkhirBank,
                 'status_validasi' => $status,
                 'bukti_transaksi' => $request->hasFile('bukti_transaksi') 
                     ? $request->file('bukti_transaksi')->store("brankas/{$request->kategori}/" . date('Y/m'), 'minio') 
@@ -130,12 +123,9 @@ public function index()
             $pathMutasi = $request->file('bukti_mutasi')->store("brankas/mutasi/" . date('Y/m'), 'minio');
 
             if ($transaksi->metode === 'transfer') {
-                // Nominal yang akan menambah saldo bank
                 $nominalMasuk = ($transaksi->kategori === 'setor_ke_admin') ? $transaksi->pengeluaran : $transaksi->pemasukan;
                 
                 $saldoBaru = $transaksi->saldo_awal_rekening + $nominalMasuk;
-
-                // 1. UPDATE BARIS INI
                 $transaksi->update([
                     'status_validasi' => 'tervalidasi',
                     'validator_id' => Auth::id(),
@@ -143,9 +133,6 @@ public function index()
                     'catatan_admin' => $request->deskripsi_validasi,
                     'saldo_akhir_rekening' => $saldoBaru
                 ]);
-
-                // 2. UPDATE SEMUA BARIS SETELAHNYA (PENTING!)
-                // Menggunakan DB::raw agar saldo mengalir sampai ke transaksi terbaru
                 TransaksiBrankas::where('id', '>', $id)->update([
                     'saldo_awal_rekening' => DB::raw("saldo_awal_rekening + $nominalMasuk"),
                     'saldo_akhir_rekening' => DB::raw("saldo_akhir_rekening + $nominalMasuk")
@@ -182,7 +169,6 @@ public function showFile($kategori, $year, $month, $filename)
 public function riwayat(Request $request)
 {
     try {
-        // Ambil query dasar dengan Eager Loading
         $query = TransaksiBrankas::with(['user', 'validator']);
 
         if ($request->start_date && $request->end_date) {

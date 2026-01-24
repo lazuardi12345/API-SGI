@@ -97,8 +97,6 @@ class GadaiUlangEmasController extends Controller
             }
 
             $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
-
-            // STEP 1: DETAIL GADAI BARU
             $detailInput = $request->input('detail', []);
 
             $lastDetail = DetailGadai::lockForUpdate()->orderBy('id', 'desc')->first();
@@ -119,7 +117,6 @@ class GadaiUlangEmasController extends Controller
                 'status'        => 'proses',
             ]);
 
-            // STEP 2: BARANG EMAS
             $barangInput = $request->input('barang', []);
             $typeId = $detail->type_id;
 
@@ -139,8 +136,6 @@ class GadaiUlangEmasController extends Controller
             $barang->berat           = $barangInput['berat'] ?? '';
             $barang->save();
 
-
-            // STEP 3: DOKUMEN PENDUKUNG EMAS
             $folderBarang = "{$folderNasabah}/{$jenisEmas}/{$detail->no_gadai}";
             $dokumenPaths = [];
 

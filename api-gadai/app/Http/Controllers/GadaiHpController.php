@@ -193,14 +193,11 @@ public function update(Request $request, $id)
     ]));
     if ($request->filled('grade_hp_id') && $request->filled('grade_type')) {
         $grade = GradeHp::find($request->grade_hp_id);
-
-        $newNominal = $request->grade_type === 'A'
-            ? $grade->harga_grade_a
-            : ($request->grade_type === 'B'
-                ? $grade->harga_grade_b
-                : $grade->harga_grade_c);
+        $columnName = "grade_" . $request->grade_type; 
+        $newNominal = $grade->$columnName ?? 0;
 
         $hp->update(['grade_nominal' => $newNominal]);
+        $hp->refresh(); 
     }
     if ($request->has('kelengkapan'))
         $hp->kelengkapanList()->sync($this->normalizeItems($request->kelengkapan));
@@ -215,22 +212,19 @@ public function update(Request $request, $id)
     $totalKerusakan = $hp->kerusakanList->sum(function ($k) {
         return $k->pivot->nominal_override ?? $k->nominal ?? 0;
     });
-    $taksiranAkhir = $hp->grade_nominal;
+    $taksiranAkhir = $hp->grade_nominal ?? $request->grade_nominal ?? 0;
     $uangPinjaman = ($taksiranAkhir + $totalKelengkapan) - $totalKerusakan;
-
     if ($uangPinjaman < 0) $uangPinjaman = 0;
     $detail = $hp->detailGadai;
     if ($detail) {
-        $detail->taksiran = $taksiranAkhir;
+        $detail->taksiran = $taksiranAkhir > 0 ? $taksiranAkhir : $detail->taksiran;
         $detail->uang_pinjaman = $uangPinjaman;
         $detail->save();
     }
     $dokumen = $hp->dokumenPendukungHp()->firstOrCreate([]);
-
     $nasabah = $hp->detailGadai->nasabah;
     $nasabahName = preg_replace('/[^A-Za-z0-9_\-]/', '', str_replace(' ', '_', $nasabah->nama_lengkap ?? 'unknown'));
     $nasabahNik  = preg_replace('/[^A-Za-z0-9]/', '', $nasabah->nik ?? 'unknown');
-
     $noGadai = $hp->detailGadai->no_gadai ?? $hp->id;
     $folder = "{$nasabahName}/handphone/{$noGadai}";
 
@@ -243,7 +237,6 @@ public function update(Request $request, $id)
             $dokumen->$field = $file->storeAs($folder, $fileName, 'minio');
         }
     }
-
     $dokumen->save();
 
     $hp->dokumen_pendukung = $this->convertDokumen($dokumen);

@@ -30,10 +30,6 @@ class GadaiEmasController extends Controller
         try {
             $user = $request->user();
             $nasabahInput = $request->input('nasabah', []);
-
-            // =========================
-            // STEP 1: NASABAH
-            // =========================
           $nasabah = DataNasabah::create([
             'user_id'      => $user->id,
             'nama_lengkap' => $nasabahInput['nama_lengkap'] ?? '',
@@ -46,45 +42,32 @@ class GadaiEmasController extends Controller
 
             $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
 
-            // Upload foto KTP nasabah
             if ($request->hasFile('nasabah.foto_ktp')) {
                 $file = $request->file('nasabah.foto_ktp');
                 $filename = 'ktp_' . ($nasabah->nik ?? $nasabah->id) . '.' . $file->getClientOriginalExtension();
                 $nasabah->foto_ktp = $file->storeAs($folderNasabah, $filename, 'minio');
                 $nasabah->save();
             }
-
-            // =========================
-            // STEP 2: DETAIL GADAI
-            // =========================
             $detailInput = $request->input('detail', []);
 
-// Ambil tanggal hari ini untuk filter
 $today = now()->format('Y-m-d');
 
-// Cari urutan terakhir KHUSUS untuk hari ini saja agar SGI-DD-MM-YYYY tidak duplikat
 $lastDetailToday = DetailGadai::whereDate('created_at', $today)
     ->lockForUpdate()
     ->orderBy('id', 'desc')
     ->first();
 
 if ($lastDetailToday) {
-    // Ambil 4 digit terakhir dari no_gadai aslinya, lalu tambah 1
     $lastIncrement = (int) substr($lastDetailToday->no_gadai, -4);
     $next = $lastIncrement + 1;
 } else {
     $next = 1;
 }
 
-// Format No Nasabah: MMyyXXXX
 $noNasabah = date('m') . substr(date('Y'), 2) . str_pad($next, 4, '0', STR_PAD_LEFT);
-// Format No Gadai: SGI-DD-MM-YYYY-XXXX
 $noGadai   = "SGI-" . date('d-m-Y') . "-" . str_pad($next, 4, '0', STR_PAD_LEFT);
-
-// DOUBLE CHECK: Pastikan nomor ini belum benar-benar ada di DB (Safety Net)
 $exists = DetailGadai::where('no_gadai', $noGadai)->exists();
 if ($exists) {
-    // Jika masih ada (karena tabrakan race condition), naikkan terus sampai dapat yang kosong
     while (DetailGadai::where('no_gadai', $noGadai)->exists()) {
         $next++;
         $noGadai = "SGI-" . date('d-m-Y') . "-" . str_pad($next, 4, '0', STR_PAD_LEFT);
@@ -103,10 +86,6 @@ $detail = DetailGadai::create([
     'uang_pinjaman' => (int) ($detailInput['uang_pinjaman'] ?? 0),
     'status'        => 'proses',
 ]);
-
-            // =========================
-            // STEP 3: BARANG EMAS
-            // =========================
             $barangInput = $request->input('barang', []);
             $typeId = $detail->type_id;
 
@@ -137,10 +116,6 @@ $detail = DetailGadai::create([
             $barang->potongan_batu   = $barangInput['potongan_batu'] ?? '';
             $barang->berat           = $barangInput['berat'] ?? '';
             $barang->save();
-
-            // =========================
-            // STEP 4: DOKUMEN PENDUKUNG EMAS
-            // =========================
             $folderBarang = "{$folderNasabah}/{$jenisEmas}/{$detail->no_gadai}";
             $dokumenPaths = [];
 
@@ -164,11 +139,22 @@ $detail = DetailGadai::create([
 
             DB::commit();
 
+
+            try {
+                $detail->loadMissing('nasabah');
+                $notificationService = app(\App\Services\NotificationService::class);
+                $notificationService->notifyNewTransaction($detail);
+                
+            } catch (\Exception $e) {
+                \Log::warning('Gagal kirim notif Emas: ' . $e->getMessage());
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Data gadai emas berhasil disimpan.',
                 'detail_id' => $detail->id,
                 'barang_id' => $barang->id,
+                'no_gadai'  => $detail->no_gadai
             ], 201);
 
         } catch (\Exception $e) {

@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('type_hp_id')->constrained('type_hp')->cascadeOnDelete();
             $table->integer('harga_barang');
+            $table->integer('harga_pasar');
             $table->timestamps();
         });
     }

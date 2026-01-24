@@ -173,6 +173,7 @@ class ComposerStaticInit2d4d633f32e7d0d67962960fa6032181
         'F' =>
         array (
             'Fruitcake\\Cors\\' => 15,
+            'Firebase\\JWT\\' => 13,
             'Faker\\' => 6,
         ),
         'E' =>
@@ -575,6 +576,10 @@ class ComposerStaticInit2d4d633f32e7d0d67962960fa6032181
         array (
             0 => __DIR__ . '/..' . '/fruitcake/php-cors/src',
         ),
+        'Firebase\\JWT\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/firebase/php-jwt/src',
+        ),
         'Faker\\' =>
         array (
             0 => __DIR__ . '/..' . '/fakerphp/faker/src/Faker',
@@ -737,6 +742,7 @@ class ComposerStaticInit2d4d633f32e7d0d67962960fa6032181
         'App\\Http\\Controllers\\LaporanHarianCheckerController' => __DIR__ . '/../..' . '/app/Http/Controllers/LaporanHarianCheckerController.php',
         'App\\Http\\Controllers\\MerkHpController' => __DIR__ . '/../..' . '/app/Http/Controllers/MerkHpController.php',
         'App\\Http\\Controllers\\NotificationController' => __DIR__ . '/../..' . '/app/Http/Controllers/NotificationController.php',
+        'App\\Http\\Controllers\\NotificationServiceController' => __DIR__ . '/../..' . '/app/Http/Controllers/NotificationServiceController.php',
         'App\\Http\\Controllers\\PelelanganController' => __DIR__ . '/../..' . '/app/Http/Controllers/PelelanganController.php',
         'App\\Http\\Controllers\\PerpanjanganTempoController' => __DIR__ . '/../..' . '/app/Http/Controllers/PerpanjanganTempoController.php',
         'App\\Http\\Controllers\\PetugasLaporanController' => __DIR__ . '/../..' . '/app/Http/Controllers/PetugasLaporanController.php',
@@ -3224,6 +3230,14 @@ class ComposerStaticInit2d4d633f32e7d0d67962960fa6032181
         'Faker\\Provider\\zh_TW\\Text' => __DIR__ . '/..' . '/fakerphp/faker/src/Faker/Provider/zh_TW/Text.php',
         'Faker\\UniqueGenerator' => __DIR__ . '/..' . '/fakerphp/faker/src/Faker/UniqueGenerator.php',
         'Faker\\ValidGenerator' => __DIR__ . '/..' . '/fakerphp/faker/src/Faker/ValidGenerator.php',
+        'Firebase\\JWT\\BeforeValidException' => __DIR__ . '/..' . '/firebase/php-jwt/src/BeforeValidException.php',
+        'Firebase\\JWT\\CachedKeySet' => __DIR__ . '/..' . '/firebase/php-jwt/src/CachedKeySet.php',
+        'Firebase\\JWT\\ExpiredException' => __DIR__ . '/..' . '/firebase/php-jwt/src/ExpiredException.php',
+        'Firebase\\JWT\\JWK' => __DIR__ . '/..' . '/firebase/php-jwt/src/JWK.php',
+        'Firebase\\JWT\\JWT' => __DIR__ . '/..' . '/firebase/php-jwt/src/JWT.php',
+        'Firebase\\JWT\\JWTExceptionWithPayloadInterface' => __DIR__ . '/..' . '/firebase/php-jwt/src/JWTExceptionWithPayloadInterface.php',
+        'Firebase\\JWT\\Key' => __DIR__ . '/..' . '/firebase/php-jwt/src/Key.php',
+        'Firebase\\JWT\\SignatureInvalidException' => __DIR__ . '/..' . '/firebase/php-jwt/src/SignatureInvalidException.php',
         'Fruitcake\\Cors\\CorsService' => __DIR__ . '/..' . '/fruitcake/php-cors/src/CorsService.php',
         'Fruitcake\\Cors\\Exceptions\\InvalidOptionException' => __DIR__ . '/..' . '/fruitcake/php-cors/src/Exceptions/InvalidOptionException.php',
         'GrahamCampbell\\ResultType\\Error' => __DIR__ . '/..' . '/graham-campbell/result-type/src/Error.php',

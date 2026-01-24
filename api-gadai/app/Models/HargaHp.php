@@ -16,6 +16,7 @@ class HargaHp extends Model
     protected $fillable = [
         'type_hp_id',
         'harga_barang',
+        'harga_pasar'
     ];
 
 

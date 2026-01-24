@@ -13,9 +13,6 @@ class PetugasLaporanController extends Controller
 {
     use ReportHelper;
 
-    /**
-     * HALAMAN 1: CETAK LAPORAN REKAPITULASI HARIAN
-     */
    public function cetakLaporanHarian(Request $request)
     {
         try {
@@ -98,9 +95,6 @@ class PetugasLaporanController extends Controller
         } catch (\Exception $e) { return response()->json(['success' => false, 'message' => $e->getMessage()], 500); }
     }
 
-    /**
-     * MENGAJUKAN LAPORAN HARIAN (Method ini hanya boleh ada satu!)
-     */
     public function ajukanLaporan(Request $request)
     {
         try {

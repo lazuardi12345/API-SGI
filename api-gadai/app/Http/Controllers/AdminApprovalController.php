@@ -127,7 +127,6 @@ private function hitungKalkulasi($detail, $tanggalAcuan = null)
 
 public function index(Request $request)
 {
-    // Default filter hanya menampilkan yang 'lunas'
     $statusFilter = $request->get('status', 'lunas'); 
 
     $query = DetailGadai::with([

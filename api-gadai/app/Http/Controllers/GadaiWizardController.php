@@ -46,7 +46,6 @@ class GadaiWizardController extends Controller
             $detailInput  = $request->input('detail', []);
             $barangInput  = $request->input('barang', []);
 
-            // STEP 1: SIMPAN NASABAH + FOTO KTP
            $nasabahData = [
     'user_id'      => $user->id,
     'nama_lengkap' => $nasabahInput['nama_lengkap'],
@@ -58,7 +57,6 @@ class GadaiWizardController extends Controller
 ];
             $nasabah = DataNasabah::create($nasabahData);
 
-            // Upload Foto KTP
             $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
             
             if ($request->hasFile('nasabah.foto_ktp')) {
@@ -68,7 +66,7 @@ class GadaiWizardController extends Controller
                 $nasabah->update(['foto_ktp' => $ktpPath]);
             }
 
-            // STEP 2: GENERATE NOMOR GADAI
+
             $tanggal = date_create($detailInput['tanggal_gadai']);
             [$day, $month, $year] = [$tanggal->format('d'), $tanggal->format('m'), $tanggal->format('Y')];
 
@@ -95,7 +93,6 @@ class GadaiWizardController extends Controller
                 'status'        => 'proses',
             ]);
 
-            // STEP 3: SIMPAN DATA BARANG HP (LENGKAP)
             $pureGradeType = strtolower(str_replace(['-', ' '], '_', $barangInput['grade_type']));
 
             $barangData = [
@@ -124,7 +121,6 @@ class GadaiWizardController extends Controller
                 $barang->kelengkapanList()->sync($barangInput['kelengkapan']);
             }
 
-            // STEP 4: KALKULASI HARGA DARI GRADE_HP 
             $finalTaksiran = 0;
             $finalUangPinjaman = 0;
             $totalPersenKerusakan = 0;
@@ -184,8 +180,14 @@ class GadaiWizardController extends Controller
                 'grade_nominal' => $finalUangPinjaman
             ]);
 
-            // STEP 5: UPLOAD DOKUMEN SOP
             $this->uploadDokumenSop($request, $barang, $nasabah, $detail);
+
+            try {
+                $notificationService = app(\App\Services\NotificationService::class);
+                $notificationService->notifyNewTransaction($detail);
+            } catch (\Exception $e) {
+                \Log::warning('Gagal mengirim notifikasi real-time: ' . $e->getMessage());
+            }
 
             DB::commit();
 

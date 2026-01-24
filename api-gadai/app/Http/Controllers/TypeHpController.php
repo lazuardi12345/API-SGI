@@ -33,12 +33,14 @@ public function getByMerk($merkId)
         $harga = $type->hargaTerbaru; 
 
         return [
-            'id'           => $type->id,
-            'id_harga'     => $harga ? $harga->id : null, 
-            'nama_type'    => $type->nama_type,
-            'harga_barang' => $harga ? $harga->harga_barang : (int) 0,
-            'has_grade'    => $type->grades_count > 0,
-            'updated_at'   => $harga ? $harga->updated_at : null, 
+            'id'                => $type->id,
+            'id_harga'          => $harga ? $harga->id : null, 
+            'nama_type'         => $type->nama_type,
+            'harga_barang'      => $harga ? $harga->harga_barang : 0,
+            'harga_pasar'       => $harga ? $harga->harga_pasar : 0, 
+            'has_grade'         => $type->grades_count > 0,
+            'updated_at'        => $harga ? $harga->updated_at : null,
+            'updated_at_harga'  => $harga ? $harga->updated_at : null,
         ];
     });
 

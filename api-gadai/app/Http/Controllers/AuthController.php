@@ -9,16 +9,12 @@ use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
-    /**
-     * Register user baru.
-     */
     public function register(Request $request)
     {
         $request->validate([
             'name'     => 'required|string|max:255',
             'email'    => 'required|email|unique:users,email',
             'password' => 'required|string|min:6|confirmed',
-            // sesuaikan enum role baru
             'role'     => 'required|in:hm,admin,checker,petugas',
         ]);
 
@@ -35,16 +31,13 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Registrasi berhasil.',
             'data' => [
-                'user'       => $user,
-                'token'      => $token,
-                'token_type' => 'Bearer',
+                'user'         => $user,
+                'access_token' => $token, 
+                'token_type'   => 'Bearer',
             ]
         ], 201);
     }
 
-    /**
-     * Login user yang sudah terdaftar.
-     */
     public function login(Request $request)
     {
         $request->validate([
@@ -60,24 +53,19 @@ class AuthController extends Controller
                 'message' => 'Email atau password salah.'
             ], 401);
         }
-
-        // buat token baru
         $token = JWTAuth::fromUser($user);
 
         return response()->json([
             'success' => true,
             'message' => 'Login berhasil.',
             'data' => [
-                'user'       => $user,
-                'token'      => $token,
-                'token_type' => 'Bearer',
+                'user'         => $user,
+                'access_token' => $token, 
+                'token_type'   => 'Bearer',
             ]
         ]);
     }
 
-    /**
-     * Logout user (hapus token aktif).
-     */
     public function logout(Request $request)
     {
         try {

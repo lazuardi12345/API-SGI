@@ -30,8 +30,13 @@ return [
         'https://www.api-gadai.cash-gampang.com',
         'http://ardi.local:3000',
         'http://192.182.6.107:3000',
+        'http://192.182.6.107:3001',
         'http://localhost:3001',
-        'https://berlin-instances-parcel-sig.trycloudflare.com'
+        'http://192.182.6.69:3101',
+        'https://genetic-extension-organized-interactive.trycloudflare.com',
+        'https://rarely-manor-leisure-templates.trycloudflare.com',
+        'https://clicks-characterized-acting-shop.trycloudflare.com'
+
     ],
 
     /*

@@ -28,37 +28,29 @@ class User extends Authenticatable implements JWTSubject
         'password' => 'hashed',
     ];
 
-    /**
-     * Get the identifier that will be stored in the subject claim of the JWT.
-     */
+
     public function getJWTIdentifier()
     {
-        return $this->getKey();
+        return (int) $this->getKey();
     }
 
-    /**
-     * Return a key value array, containing any custom claims to be added to the JWT.
-     */
+
     public function getJWTCustomClaims()
     {
         return [
-            'role' => $this->role,
-            'name' => $this->name,
-            'email' => $this->email,
+            'role'  => (string) $this->role,
+            'name'  => (string) $this->name,
+            'email' => (string) $this->email,
         ];
     }
 
-    /**
-     * Cek apakah user punya role tertentu
-     */
+
     public function hasRole(string $role): bool
     {
         return $this->role === $role;
     }
 
-    /**
-     * Cek apakah user punya salah satu role dari array
-     */
+
     public function hasAnyRole(array $roles): bool
     {
         return in_array($this->role, $roles);

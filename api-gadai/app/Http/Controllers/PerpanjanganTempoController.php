@@ -59,14 +59,10 @@ public function store(Request $request)
     $tglExtend = Carbon::parse($request->tanggal_perpanjangan);
     $jtLama = Carbon::parse($gadai->jatuh_tempo); 
     $jtBaru = Carbon::parse($request->jatuh_tempo_baru);
-
-    // Hitung selisih hari telat dan periode tenor baru
     $totalTelat = max(0, $jtLama->diffInDays($tglExtend, false));
     $periodeBaruHari = max(0, $tglExtend->diffInDays($jtBaru, false));
 
     $isHandphoneElektronik = in_array($typeNama, ['handphone', 'hp', 'elektronik']);
-
-    // 1. Kalkulasi Jasa (Sesuai Tenor 15/30 hari)
     $jasa = 0;
     if ($isHandphoneElektronik) {
         $rateJasa = ($periodeBaruHari <= 15) ? 0.045 : 0.095;

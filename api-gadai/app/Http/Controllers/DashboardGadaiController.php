@@ -21,8 +21,6 @@ public function summary()
     $queryBelumLunas = DetailGadai::where('status', 'selesai');
     $jumlahBelumLunas = $queryBelumLunas->count();
     $nominalBelumLunas = $queryBelumLunas->sum('uang_pinjaman');
-
-    // 3. SUDAH LUNAS (Status 'lunas')
     $queryLunas = DetailGadai::where('status', 'lunas');
     $jumlahLunas = $queryLunas->count();
     $nominalLunas = $queryLunas->sum('uang_pinjaman');

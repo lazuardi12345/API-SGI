@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\Auth;
 
 class DataNasabahController extends Controller
 {
-    // List bank untuk validasi (sama dengan Migration)
     protected $bankList = [
         'BCA', 'BRI', 'BNI', 'MANDIRI', 'BTN', 'SEABANK', 'BANK_JAGO', 'NEO_COMMERCE', 
         'ALOO_BANK', 'BLU', 'LINE_BANK', 'DIGIBANK', 'TMRW', 'BANK_RAYA', 'HIBANK',
@@ -38,8 +37,8 @@ class DataNasabahController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('nama_lengkap', 'LIKE', "%{$search}%")
                   ->orWhere('nik', 'LIKE', "%{$search}%")
-                  ->orWhere('no_rek', 'LIKE', "%{$search}%") // Sesuaikan field
-                  ->orWhere('bank', 'LIKE', "%{$search}%");     // Tambah search bank
+                  ->orWhere('no_rek', 'LIKE', "%{$search}%") 
+                  ->orWhere('bank', 'LIKE', "%{$search}%");   
             });
         }
 
@@ -122,13 +121,10 @@ class DataNasabahController extends Controller
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
-
-        // Mass Update untuk field teks
         $nasabah->update($request->only(['nama_lengkap', 'nik', 'alamat', 'no_hp', 'bank', 'no_rek']));
 
         if ($request->hasFile('foto_ktp')) {
             if ($nasabah->foto_ktp) {
-                // Hapus file lama di minio berdasarkan path asli (bukan URL)
                 $oldPath = str_replace(url("api/files/"), "", $nasabah->getRawOriginal('foto_ktp'));
                 Storage::disk('minio')->delete($oldPath);
             }

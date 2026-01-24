@@ -25,7 +25,7 @@ class LaporanHarianCheckerController extends Controller
         ];
     }
 
- public function cetakLaporanSerahTerima(Request $request)
+public function cetakLaporanSerahTerima(Request $request)
     {
         try {
             $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
@@ -116,15 +116,11 @@ class LaporanHarianCheckerController extends Controller
         }
     }
 
-    /**
-     * HALAMAN 3: PERPANJANGAN TEMPO
-     */
+
 public function cetakLaporanPerpanjangan(Request $request)
     {
         try {
             $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
-
-            // 1. Cek Metadata Approval dari tabel ReportPrint (Gunakan tipe: perpanjangan)
             $existing = ReportPrint::where('report_type', 'perpanjangan')
                 ->where('report_date', $tanggal)
                 ->first();
@@ -133,13 +129,9 @@ public function cetakLaporanPerpanjangan(Request $request)
             $namaManager = $existing ? $existing->approved_by : null;
             $docId = $existing ? $existing->doc_id : null;
             $qrCode = null;
-
-            // Jika sudah di-ACC oleh manager, generate QR Code Signature
             if ($isApproved && $namaManager && $docId) {
                 $qrCode = $this->generateReportQr("Perpanjangan Gadai", $tanggal, $docId, $namaManager);
             }
-
-            // 2. Ambil data perpanjangan yang SUDAH LUNAS bayar di tanggal tersebut
             $dataPerpanjangan = \App\Models\PerpanjanganTempo::with([
                     'detailGadai.nasabah',
                     'detailGadai.hp.merk',
@@ -149,18 +141,14 @@ public function cetakLaporanPerpanjangan(Request $request)
                     'detailGadai.retro'
                 ])
                 ->where('status_bayar', 'lunas')
-                ->whereDate('updated_at', $tanggal) // Mengacu pada kapan transaksi diapprove/bayar
+                ->whereDate('updated_at', $tanggal) 
                 ->get();
-
-            // 3. Mapping Data untuk baris tabel
             $formattedPerpanjangan = $dataPerpanjangan->map(function ($p) {
                 $gadai = $p->detailGadai;
                 if (!$gadai) return null;
 
                 $namaBarang = '-';
                 $detailBarang = '-';
-
-                // Logic deteksi barang (Konsisten dengan laporan lain)
                 if ($gadai->hp) {
                     $namaBarang = "HP: " . ($gadai->hp->merk->nama_merk ?? '') . " " . ($gadai->hp->type_hp->nama_type ?? '');
                     $detailBarang = "IMEI: " . ($gadai->hp->imei ?? '-');
@@ -187,7 +175,6 @@ public function cetakLaporanPerpanjangan(Request $request)
                 ];
             })->filter()->values();
 
-            // 4. Response JSON
             return response()->json([
                 'success' => true,
                 'metadata' => [
@@ -211,15 +198,12 @@ public function cetakLaporanPerpanjangan(Request $request)
         }
     }
 
-    /**
-     * HALAMAN 4: PELELANGAN
-     */
+
 public function cetakLaporanPelelangan(Request $request)
 {
     try {
         $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
         
-        // 1. Cek Metadata Approval
         $existing = ReportPrint::where('report_type', 'pelelangan')
             ->where('report_date', $tanggal)
             ->first();
@@ -232,8 +216,6 @@ public function cetakLaporanPelelangan(Request $request)
         if ($isApproved && $namaManager && $docId) {
             $qrCode = $this->generateReportQr("Laporan Pelelangan", $tanggal, $docId, $namaManager);
         }
-
-        // 2. Ambil Data - Eager Loading Relasi agar detail tidak kosong
         $dataLelang = \App\Models\DetailGadai::with([
                 'nasabah', 
                 'pelelangan', 
@@ -254,20 +236,16 @@ public function cetakLaporanPelelangan(Request $request)
             $nominalMasuk = (float)($lelang->nominal_diterima ?? 0);
 
             $detail = "-";
-            
-            // LOGIKA HP: Sesuai request (Hanya Merk/Type dan IMEI)
             if ($gadai->hp) {
                 $hp = $gadai->hp;
                 $detail = ($hp->merk->nama_merk ?? '') . " " . ($hp->type_hp->nama_type ?? '') . "\n";
                 $detail .= "IMEI: " . ($hp->imei ?? '-');
             } 
-            // LOGIKA PERHIASAN: Berat, Karat, Kode Cap
             elseif ($gadai->perhiasan) {
                 $p = $gadai->perhiasan;
                 $detail = "Perhiasan: " . ($p->nama_barang ?? 'Emas') . "\n";
                 $detail .= "Berat: " . ($p->berat ?? '0') . " gr | Karat: " . ($p->karat ?? '-') . " | Kode cap: " . ($p->kode_cap ?? '-');
             }
-            // LOGIKA LOGAM MULIA
             elseif ($gadai->logamMulia) {
                 $lm = $gadai->logamMulia;
                 $detail = "LM: " . ($lm->nama_barang ?? 'Logam Mulia') . "\n";
@@ -286,7 +264,6 @@ public function cetakLaporanPelelangan(Request $request)
             ];
         });
 
-        // 3. Response JSON
         return response()->json([
             'success' => true,
             'metadata' => [
@@ -398,8 +375,6 @@ public function ajukanLaporanChecker(Request $request)
 {
     try {
         $tanggal = $request->report_date ?? date('Y-m-d');
-        
-        // Daftar laporan khusus Checker (Halaman 2-5)
         $tipeLaporan = [
             'serah_terima'  => 'REP-LNS',
             'perpanjangan'  => 'REP-PJG',
@@ -509,17 +484,11 @@ public function getReportHistory(Request $request)
     }
     
 
-    /**
-     * UNTUK UMUM: Tampilan Verifikasi QR Code (SGI Digital Signature)
-     */
     public function publicVerify(Request $request, $doc_id)
     {
-        // 1. Cek validitas di Database
         $reportPrint = ReportPrint::where('doc_id', $doc_id)
             ->where('is_approved', true)
             ->first();
-        
-        // --- VIEW GAGAL ---
         if (!$reportPrint) {
             return "
             <html>
@@ -547,8 +516,6 @@ public function getReportHistory(Request $request)
             </body>
             </html>";
         }
-
-        // 2. Decode Metadata dari parameter 'd'
         $dataRaw = $request->query('d');
         $info = json_decode(base64_decode($dataRaw), true) ?? [];
 

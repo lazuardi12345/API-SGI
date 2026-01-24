@@ -9,9 +9,6 @@ use Illuminate\Support\Facades\Auth;
 
 class ApprovalController extends Controller
 {
-    // =====================
-    // GET SEMUA DATA UNTUK HM/CHECKER
-    // =====================
     public function getAll(Request $request)
     {
         $perPage = 10; 
@@ -23,12 +20,10 @@ class ApprovalController extends Controller
         ])->orderBy('created_at', 'desc');
 
         if ($user->role === 'hm') {
-            // HM hanya melihat data yang sudah diapprove/reject oleh checker
             $query->whereHas('approvals', function ($q) {
                 $q->whereIn('status', ['approved_checker','rejected_checker']);
             });
         } else {
-            // Checker / role lain
             $query->where('status', 'Selesai')
                   ->whereDoesntHave('approvals', function ($q) {
                       $q->whereIn('status', ['approved_checker','rejected_checker','approved_hm','rejected_hm']);
@@ -52,16 +47,11 @@ class ApprovalController extends Controller
         ]);
     }
 
-    // =====================
-    // GET DETAIL APPROVAL
-    // =====================
     public function getApprovalDetail($detailGadaiId, Request $request)
     {
         $detail = DetailGadai::with([
             'nasabah', 'type', 'approvals.user', 'perpanjanganTempos'
         ])->findOrFail($detailGadaiId);
-
-        // Lazy load relasi besar
         $hp = $detail->hp()->paginate($request->get('hp_per_page', 10));
         $perhiasan = $detail->perhiasan()->paginate($request->get('perhiasan_per_page', 10));
         $logamMulia = $detail->logamMulia()->paginate($request->get('logamMulia_per_page', 10));
@@ -80,10 +70,7 @@ class ApprovalController extends Controller
         ]);
     }
 
-    // =====================
-    // UPDATE DETAIL GADAI (HANYA FIELD YANG BOLEH)
-    // =====================
-  public function updateApprovalDetail(Request $request, $detailGadaiId)
+public function updateApprovalDetail(Request $request, $detailGadaiId)
 {
     $user = Auth::user();
     if (!$user || $user->role !== 'hm') {
@@ -91,8 +78,6 @@ class ApprovalController extends Controller
     }
 
     $detail = DetailGadai::findOrFail($detailGadaiId);
-
-    // Validasi hanya field yang boleh diedit
     $request->validate([
         'detail_gadai.uang_pinjaman' => 'nullable|numeric',
         'detail_gadai.taksiran' => 'nullable|numeric',
@@ -104,23 +89,14 @@ class ApprovalController extends Controller
         'perpanjangan_tempos.*.tanggal_perpanjangan' => 'nullable|date',
         'perpanjangan_tempos.*.jatuh_tempo_baru' => 'nullable|date',
     ]);
-
-    // ========================
-    // Update Detail Gadai
-    // ========================
     $detailData = $request->input('detail_gadai', []);
     if (!empty($detailData)) {
-        // Ambil hanya field yang diubah
         $updateData = array_filter($detailData, fn($v) => !is_null($v));
 
         if (!empty($updateData)) {
             $detail->update($updateData);
         }
     }
-
-    // ========================
-    // Update Perpanjangan Tempo
-    // ========================
     $perpanjangan = $request->input('perpanjangan_tempos', []);
     foreach ($perpanjangan as $p) {
         $tempo = $detail->perpanjanganTempos()->find($p['id']);
@@ -135,8 +111,6 @@ class ApprovalController extends Controller
             }
         }
     }
-
-    // Load ulang relasi agar frontend mendapatkan data terbaru
     $detail->load(['perpanjanganTempos', 'nasabah', 'type', 'hp', 'perhiasan', 'logamMulia', 'retro']);
 
     return response()->json([
@@ -156,8 +130,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
     }
 
     $detail = DetailGadai::findOrFail($detailGadaiId);
-
-    // Validasi field yang boleh diedit
     $request->validate([
         'detail_gadai.uang_pinjaman' => 'nullable|numeric',
         'detail_gadai.taksiran' => 'nullable|numeric',
@@ -169,10 +141,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
         'perpanjangan_tempos.*.tanggal_perpanjangan' => 'nullable|date',
         'perpanjangan_tempos.*.jatuh_tempo_baru' => 'nullable|date',
     ]);
-
-    // ========================
-    // Update Detail Gadai
-    // ========================
     $detailData = $request->input('detail_gadai', []);
     if (!empty($detailData)) {
         $updateData = array_filter($detailData, fn($v) => !is_null($v));
@@ -180,10 +148,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
             $detail->update($updateData);
         }
     }
-
-    // ========================
-    // Update Perpanjangan Tempo
-    // ========================
     $perpanjangan = $request->input('perpanjangan_tempos', []);
     foreach ($perpanjangan as $p) {
         $tempo = $detail->perpanjanganTempos()->find($p['id']);
@@ -198,8 +162,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
             }
         }
     }
-
-    // Load ulang relasi agar frontend mendapatkan data terbaru
     $detail->load(['perpanjanganTempos', 'nasabah', 'type', 'hp', 'perhiasan', 'logamMulia', 'retro']);
 
     return response()->json([
@@ -209,12 +171,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
     ]);
 }
 
-
-
-
-    // =====================
-    // UPDATE STATUS APPROVAL
-    // =====================
     public function updateStatus(Request $request, $detailGadaiId)
     {
         $request->validate([
@@ -240,8 +196,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
                 'message' => 'Anda sudah melakukan approve/reject untuk data ini sebagai ' . strtoupper($user->role)
             ], 400);
         }
-
-        // Buat record approval baru
         $approval = Approval::create([
             'detail_gadai_id' => $detailGadaiId,
             'user_id' => $user->id,
@@ -249,8 +203,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
             'status' => $request->status,
             'catatan' => $request->catatan,
         ]);
-
-        // Update kolom status di detail gadai
         if ($user->role === 'checker') {
             $detailGadai->update(['status_checker' => $request->status]);
         } elseif ($user->role === 'hm') {
@@ -263,10 +215,6 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
             'data' => $approval,
         ]);
     }
-
-    // =====================
-    // FILTER DATA SESUAI ROLE & STATUS
-    // =====================
     public function getCheckerApproved(Request $request) { return $this->filterByRoleStatus('checker','approved_checker','Data approved oleh Checker',$request); }
     public function getCheckerRejected(Request $request) { return $this->filterByRoleStatus('checker','rejected_checker','Data rejected oleh Checker',$request); }
     public function getHmApproved(Request $request) { return $this->filterByRoleStatus('hm','approved_hm','Data approved oleh HM',$request); }

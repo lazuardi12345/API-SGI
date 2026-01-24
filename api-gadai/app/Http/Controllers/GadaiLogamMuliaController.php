@@ -21,7 +21,6 @@ class GadaiLogamMuliaController extends Controller
         'karatase',
         'ukuran_batu',
     ];
-    // ================= INDEX =================
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -70,8 +69,6 @@ class GadaiLogamMuliaController extends Controller
             ]
         ]);
     }
-
-    // ================= SHOW =================
     public function show($id)
     {
         $logam = GadaiLogamMulia::with('detailGadai.nasabah','dokumenPendukung','kelengkapanEmas')->find($id);
@@ -106,8 +103,6 @@ class GadaiLogamMuliaController extends Controller
             ]
         ]);
     }
-
-    // ================= STORE =================
 public function store(Request $request)
 {
     $validator = Validator::make($request->all(), [
@@ -129,8 +124,6 @@ public function store(Request $request)
         $logam = GadaiLogamMulia::create($request->only([
             'nama_barang','kode_cap','karat','potongan_batu','berat','detail_gadai_id'
         ]));
-
-        // ==================== DOKUMEN ====================
         $dokumen = $logam->dokumenPendukung()->firstOrCreate([
             'emas_type'=>'logam_mulia',
             'emas_id'=>$logam->id
@@ -155,8 +148,6 @@ public function store(Request $request)
         }
 
         $dokumen->save();
-
-        // ==================== KELENGKAPAN ====================
         if($request->filled('kelengkapan') && is_array($request->kelengkapan)){
             $ids = array_map(fn($item)=>$item['id'],$request->kelengkapan);
             $logam->kelengkapanEmas()->sync($ids);
@@ -179,10 +170,6 @@ public function store(Request $request)
         ],500);
     }
 }
-
-
-
-    // ================= UPDATE =================
 public function update(Request $request, $id)
 {
     $logam = GadaiLogamMulia::with('detailGadai.nasabah')->find($id);
@@ -200,7 +187,7 @@ public function update(Request $request, $id)
         'karat'             => 'nullable|numeric',
         'potongan_batu'     => 'nullable|string',
         'berat'             => 'nullable|numeric',
-        'dokumen_pendukung' => 'nullable|array',
+        'dokumen_pendukung.*' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         'kelengkapan'       => 'nullable|array',
     ]);
 
@@ -212,12 +199,9 @@ public function update(Request $request, $id)
     }
 
     try {
-        // Update field biasa
         $logam->update(
             $request->only(['nama_barang','kode_cap','karat','potongan_batu','berat'])
         );
-
-        // ==================== DOKUMEN PENDUKUNG ====================
         $dokumen = $logam->dokumenPendukung()->firstOrCreate([
             'emas_type' => 'logam_mulia',
             'emas_id'   => $logam->id
@@ -228,14 +212,22 @@ public function update(Request $request, $id)
         $nasabahNik  = preg_replace('/[^A-Za-z0-9]/', '', $nasabah->nik);
         $noGadai     = $logam->detailGadai->no_gadai ?? $logam->id;
         $folder      = "{$nasabahName}/logam_mulia/{$noGadai}";
+        $dokumenFields = [
+            'emas_timbangan',
+            'gosokan_timer',
+            'gosokan_ktp',
+            'batu',
+            'cap_merek',
+            'karatase',
+            'ukuran_batu'
+        ];
 
-        foreach ($request->dokumen_pendukung ?? [] as $field => $value) {
-            if ($request->hasFile("dokumen_pendukung.$field")) {
+        foreach ($dokumenFields as $field) {
+            if ($request->hasFile("dokumen_pendukung.{$field}")) {
                 if ($dokumen->$field && Storage::disk('minio')->exists($dokumen->$field)) {
                     Storage::disk('minio')->delete($dokumen->$field);
                 }
-
-                $file     = $request->file("dokumen_pendukung.$field");
+                $file     = $request->file("dokumen_pendukung.{$field}");
                 $ext      = $file->getClientOriginalExtension();
                 $fileName = "{$field}_{$nasabahNik}.{$ext}";
                 $path     = $file->storeAs($folder, $fileName, 'minio');
@@ -245,21 +237,17 @@ public function update(Request $request, $id)
         }
 
         $dokumen->save();
+if ($request->filled('kelengkapan')) {
+    $ids = array_map(fn($item) => $item['id'], $request->kelengkapan);
+    $logam->kelengkapanEmas()->sync($ids);
+}
+$logam->load(['kelengkapanEmas', 'detailGadai.nasabah', 'dokumenPendukung']);
 
-        // ==================== SYNC KELENGKAPAN ====================
-        if ($request->filled('kelengkapan')) {
-            $ids = array_map(fn($item) => $item['id'], $request->kelengkapan);
-            $logam->kelengkapanEmas()->sync($ids);
-        }
-
-        // convert dokumen untuk response
-        $logam->dokumen_pendukung = $this->convertDokumenToURL($dokumen);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil diperbarui.',
-            'data'    => $logam->load(['kelengkapanEmas'])
-        ]);
+return response()->json([
+    'success' => true,
+    'message' => 'Data berhasil diperbarui.',
+    'data'    => $logam
+]);
 
     } catch (\Throwable $e) {
         Log::error('Gagal update logam mulia: '.$e->getMessage());
@@ -271,12 +259,6 @@ public function update(Request $request, $id)
         ], 500);
     }
 }
-
-
-
-
-
-    // ================= DESTROY =================
     public function destroy($id)
     {
         $logam = GadaiLogamMulia::with('dokumenPendukung','kelengkapanEmas')->find($id);
@@ -296,25 +278,39 @@ public function update(Request $request, $id)
 
         return response()->json(['success'=>true,'message'=>'Data berhasil dihapus.']);
     }
+   private function convertDokumenToURL($dokumen)
+{
+    if (!$dokumen) return [];
 
-    // ================= HELPERS =================
-    private function convertDokumenToURL($dokumen)
-    {
-        $converted = [];
-        foreach($dokumen->getAttributes() as $key=>$path){
-            if(!in_array($key,['id','emas_type','emas_id','created_at','updated_at']) && $path){
-                $converted[$key] = url("api/files/{$path}");
-            } else {
-                $converted[$key] = null;
-            }
-        }
-        return $converted;
+    $converted = [
+        'id' => $dokumen->id,
+        'emas_type' => $dokumen->emas_type,
+        'emas_id' => $dokumen->emas_id,
+        'created_at' => $dokumen->created_at,
+        'updated_at' => $dokumen->updated_at,
+    ];
+    $dokumenFields = [
+        'emas_timbangan',
+        'gosokan_timer',
+        'gosokan_ktp',
+        'batu',
+        'cap_merek',
+        'karatase',
+        'ukuran_batu'
+    ];
+
+    foreach ($dokumenFields as $field) {
+        $converted[$field] = $dokumen->$field 
+            ? url("api/files/{$dokumen->$field}") 
+            : null;
     }
+
+    return $converted;
+}
 
    private function syncKelengkapan($logam, $request)
 {
     if ($request->filled('kelengkapan') && is_array($request->kelengkapan)) {
-        // Hanya ambil id kelengkapan, tanpa nominal_override
         $ids = array_map(fn($item) => $item['id'], $request->kelengkapan);
         $logam->kelengkapanEmas()->sync($ids);
     }

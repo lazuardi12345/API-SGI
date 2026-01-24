@@ -37,6 +37,9 @@ use App\Http\Controllers\PelunasanController;
 
 use App\Events\TransaksiBaru;
 // ================== AUTH ================== //
+
+
+
 Route::post('/register', [AuthController::class, 'register'])->name('auth.register');
 Route::post('/login', [AuthController::class, 'login'])->name('auth.login');
 Route::get('/v1/verify-report/{doc_id}', [LaporanHarianCheckerController::class, 'publicVerify']);
@@ -49,6 +52,27 @@ Route::get('/files/{path}', [App\Http\Controllers\StorageController::class, 'get
     Route::get('/test-notif', function () {
     event(new TransaksiBaru("Ini tes notifikasi Selesai", "Selesai", "SGI-TEST-001"));
     return "Notif Selesai terkirim!";
+});
+
+Route::get('/test-notification', function() {
+    // Menggunakan app() agar constructor __construct() di controller berjalan sempurna
+    $notifService = app(\App\Http\Controllers\NotificationServiceController::class);
+    
+    $result = $notifService->notifyRole(
+        'hm',
+        'Test Koneksi Laravel-NestJS',
+        'Jembatan notifikasi sudah LUNAS terhubung! ',
+        'info',
+        [
+            'test_id' => rand(100, 999),
+            'environment' => config('app.env')
+        ]
+    );
+    
+    return response()->json([
+        'info' => 'Mencoba mengirim notifikasi ke role HM...',
+        'nestjs_response' => $result
+    ]);
 });
 
 Route::get('/test-lunas', function () {

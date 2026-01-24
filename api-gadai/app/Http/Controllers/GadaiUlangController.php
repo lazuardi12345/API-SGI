@@ -75,8 +75,6 @@ class GadaiUlangController extends Controller
             $barangInput  = $request->input('barang', []);
 
             $nasabah = DataNasabah::findOrFail($nasabahId);
-
-            // STEP 1: GENERATE NOMOR GADAI
             $tanggal = date_create($detailInput['tanggal_gadai']);
             [$day, $month, $year] = [$tanggal->format('d'), $tanggal->format('m'), $tanggal->format('Y')];
 
@@ -99,8 +97,6 @@ class GadaiUlangController extends Controller
                 'status'        => 'proses',
             ]);
 
-
-            // STEP 2: SIMPAN DATA BARANG HP
             $pureGradeType = strtolower(str_replace(['-', ' '], '_', $barangInput['grade_type']));
 
             $barang = GadaiHp::create([
@@ -126,8 +122,6 @@ class GadaiUlangController extends Controller
             if (!empty($barangInput['kelengkapan'])) {
                 $barang->kelengkapanList()->sync($barangInput['kelengkapan']);
             }
-
-            // STEP 3: KALKULASI (DENGAN PEMBULATAN RIBUAN)
 
             $hargaMaster = HargaHp::where('type_hp_id', $barang->type_hp_id)->first();
             if (!$hargaMaster) throw new \Exception("Harga Master untuk tipe ini belum diatur.");
@@ -156,9 +150,26 @@ class GadaiUlangController extends Controller
             ]);
             $barang->update(['grade_nominal' => $finalUangPinjaman]);
 
-            // STEP 4: UPLOAD DOKUMEN SOP
-
             $this->uploadDokumenSop($request, $barang, $nasabah, $detail);
+
+                try {
+                $notificationService = app(\App\Services\NotificationService::class);
+                
+                // Hitung total gadai untuk menentukan apakah ini repeat order
+                $totalGadaiNasabah = DetailGadai::where('nasabah_id', $nasabah->id)->count();
+
+                if ($totalGadaiNasabah > 1) {
+                    // Pastikan dikirim sebagai Repeat Order jika sudah pernah gadai sebelumnya
+                    $notificationService->notifyRepeatOrder($detail, $totalGadaiNasabah);
+                } else {
+                    // Jaga-jaga jika data nasabah baru tapi masuk lewat wizard ini
+                    $notificationService->notifyNewTransaction($detail);
+                }
+            } catch (\Exception $e) {
+                \Log::error('Notifikasi Gadai Ulang Gagal: ' . $e->getMessage());
+                // Jangan throw error agar transaksi database tetap aman
+            }
+
 
             DB::commit();
 

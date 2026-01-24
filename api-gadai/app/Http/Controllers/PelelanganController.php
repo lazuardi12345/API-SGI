@@ -309,43 +309,30 @@ public function show($detailGadaiId)
 
     public function hitungKalkulasi($detail, $tanggalAcuan = null)
     {
-        // 1. Parsing Tanggal & Reset Jam ke 00:00:00 agar SINKRON
         $tglGadai = Carbon::parse($detail->tanggal_gadai)->startOfDay();
         $tglJatuhTempo = Carbon::parse($detail->jatuh_tempo)->startOfDay();
-
-        // 2. LOGIKA TENOR PAKET (Proteksi data agar tetap 15 atau 30 hari)
         $selisihHariAsli = (int) $tglGadai->diffInDays($tglJatuhTempo);
         $tenorPilihan = ($selisihHariAsli <= 20) ? 15 : 30;
-
-        // 3. LOGIKA KUNCI TANGGAL ACUAN (SINKRON DENGAN AdminApprovalController)
         if (!$tanggalAcuan) {
             $status = strtolower($detail->status);
-            // Jika status sudah final, kunci di tanggal bayar
             if (in_array($status, ['lunas', 'terlelang', 'selesai'])) {
                 $tanggalAcuan = $detail->tanggal_bayar 
                     ? Carbon::parse($detail->tanggal_bayar)->startOfDay() 
                     : Carbon::parse($detail->updated_at)->startOfDay();
             } else {
-                // Jika masih aktif/siap lelang, hitung sampai HARI INI
                 $tanggalAcuan = Carbon::today()->startOfDay();
             }
         } else {
             $tanggalAcuan = Carbon::parse($tanggalAcuan)->startOfDay();
         }
-
-        // 4. Hitung Hari Terlambat
         $hariTerlambat = 0;
         if ($tanggalAcuan->gt($tglJatuhTempo)) {
             $hariTerlambat = (int) $tglJatuhTempo->diffInDays($tanggalAcuan);
         }
-        
-        // 5. Biaya & Bunga
         $penalty = 180000;
         $diffBulan = (int) $tglGadai->diffInMonths($tanggalAcuan);
         $bulanGadai = max($diffBulan, 1);
         $bunga = $detail->uang_pinjaman * 0.01 * $bulanGadai;
-        
-        // 6. Hitung Denda (HP: 0.3%, Lainnya: 0.15%)
         $denda = 0;
         if ($hariTerlambat > 0) {
             $jenisBarang = strtolower($detail->type->nama_type ?? '');
@@ -361,7 +348,7 @@ public function show($detailGadaiId)
             'bunga' => (int) round($bunga),
             'penalty' => (int) $penalty,
             'denda' => (float) round($denda, 2),
-            'total_hutang' => (int) (ceil($totalRaw / 1000) * 1000), // Pembulatan ribuan ke atas
+            'total_hutang' => (int) (ceil($totalRaw / 1000) * 1000), 
             'jatuh_tempo' => $tglJatuhTempo->format('Y-m-d'),
             'tanggal_hitung' => $tanggalAcuan->format('Y-m-d')
         ];

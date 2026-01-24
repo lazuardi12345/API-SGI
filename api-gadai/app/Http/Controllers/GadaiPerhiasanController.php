@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Log;
 
 class GadaiPerhiasanController extends Controller
 {
-    // ================= INDEX =================
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
@@ -59,8 +58,6 @@ class GadaiPerhiasanController extends Controller
             ],
         ]);
     }
-
-    // ================= SHOW =================
     public function show($id)
     {
         $perhiasan = GadaiPerhiasan::with(['detailGadai.nasabah', 'kelengkapan', 'dokumenPendukung'])->find($id);
@@ -90,8 +87,6 @@ class GadaiPerhiasanController extends Controller
             ]
         ]);
     }
-
-    // ================= STORE =================
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -124,9 +119,7 @@ class GadaiPerhiasanController extends Controller
             return response()->json(['success'=>false,'message'=>'Gagal menyimpan data.','error'=>$e->getMessage()],500);
         }
     }
-
-    // ================= UPDATE =================
-public function update(Request $request, $id)
+   public function update(Request $request, $id)
 {
     $perhiasan = GadaiPerhiasan::with('detailGadai.nasabah')->find($id);
 
@@ -143,7 +136,7 @@ public function update(Request $request, $id)
         'karat'             => 'nullable|numeric',
         'potongan_batu'     => 'nullable|string',
         'berat'             => 'nullable|numeric',
-        'dokumen_pendukung' => 'nullable|array',
+        'dokumen_pendukung.*' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         'kelengkapan'       => 'nullable|array',
     ]);
 
@@ -155,12 +148,9 @@ public function update(Request $request, $id)
     }
 
     try {
-        // Update field utama
         $perhiasan->update(
             $request->only(['nama_barang', 'kode_cap', 'karat', 'potongan_batu', 'berat'])
         );
-
-        // ==================== DOKUMEN PENDUKUNG ====================
         $dokumen = $perhiasan->dokumenPendukung()->firstOrCreate([
             'emas_type' => 'perhiasan',
             'emas_id'   => $perhiasan->id
@@ -172,13 +162,24 @@ public function update(Request $request, $id)
         $noGadai     = $perhiasan->detailGadai->no_gadai ?? $perhiasan->id;
         $folder      = "{$nasabahName}/perhiasan/{$noGadai}";
 
-        foreach ($request->dokumen_pendukung ?? [] as $field => $value) {
-            if ($request->hasFile("dokumen_pendukung.$field")) {
+        $dokumenFields = [
+            'emas_timbangan',
+            'gosokan_timer',
+            'gosokan_ktp',
+            'batu',
+            'cap_merek',
+            'karatase',
+            'ukuran_batu'
+        ];
+
+        foreach ($dokumenFields as $field) {
+            $fileKey = "dokumen_pendukung.{$field}";
+
+            if ($request->hasFile($fileKey)) {
                 if ($dokumen->$field && Storage::disk('minio')->exists($dokumen->$field)) {
                     Storage::disk('minio')->delete($dokumen->$field);
                 }
-
-                $file     = $request->file("dokumen_pendukung.$field");
+                $file     = $request->file($fileKey);
                 $ext      = $file->getClientOriginalExtension();
                 $fileName = "{$field}_{$nasabahNik}.{$ext}";
                 $path     = $file->storeAs($folder, $fileName, 'minio');
@@ -188,20 +189,17 @@ public function update(Request $request, $id)
         }
 
         $dokumen->save();
-
-        // ==================== SYNC KELENGKAPAN ====================
+        $dokumen->refresh();
         if ($request->filled('kelengkapan')) {
             $ids = array_map(fn($item) => $item['id'], $request->kelengkapan);
             $perhiasan->kelengkapan()->sync($ids);
         }
-
-        // convert dokumen untuk response
         $perhiasan->dokumen_pendukung = $this->convertDokumenToURL($dokumen);
 
         return response()->json([
             'success' => true,
             'message' => 'Data berhasil diperbarui.',
-            'data'    => $perhiasan->load(['kelengkapan'])
+            'data'    => $perhiasan->load(['kelengkapan', 'detailGadai.nasabah'])
         ]);
 
     } catch (\Throwable $e) {
@@ -214,9 +212,6 @@ public function update(Request $request, $id)
         ], 500);
     }
 }
-
-
-    // ================= DESTROY =================
     public function destroy($id)
     {
         $perhiasan = GadaiPerhiasan::with(['dokumenPendukung','kelengkapan'])->find($id);
@@ -236,61 +231,72 @@ public function update(Request $request, $id)
 
         return response()->json(['success'=>true,'message'=>'Data berhasil dihapus.']);
     }
+    private function convertDokumenToURL($dokumen)
+    {
+        if (!$dokumen) return [];
 
-    // ================= HELPERS =================
-private function convertDokumenToURL($dokumen)
-{
-    $converted = [];
-    foreach($dokumen->getAttributes() as $key => $path){
-        if(!in_array($key,['id','emas_type','emas_id','created_at','updated_at']) && $path){
-            // Jika path sudah http, jangan tambah url lagi
-            $converted[$key] = str_starts_with($path, 'http') ? $path : url("api/files/{$path}");
-        } else {
-            $converted[$key] = null;
+        $converted = [
+            'id' => $dokumen->id,
+            'emas_type' => $dokumen->emas_type,
+            'emas_id' => $dokumen->emas_id,
+            'created_at' => $dokumen->created_at,
+            'updated_at' => $dokumen->updated_at,
+        ];
+        $dokumenFields = [
+            'emas_timbangan',
+            'gosokan_timer',
+            'gosokan_ktp',
+            'batu',
+            'cap_merek',
+            'karatase',
+            'ukuran_batu'
+        ];
+
+        foreach ($dokumenFields as $field) {
+            $converted[$field] = $dokumen->$field 
+                ? url("api/files/{$dokumen->$field}") 
+                : null;
         }
+
+        return $converted;
     }
-    return $converted;
-}
 
+    private function saveDokumen($perhiasan, $request)
+    {
+        if ($request->filled('dokumen_pendukung') && is_array($request->dokumen_pendukung)) {
+            $dok = $perhiasan->dokumenPendukung;
+            $dataDokumen = [];
 
-   private function saveDokumen($perhiasan, $request)
-{
-    if ($request->filled('dokumen_pendukung') && is_array($request->dokumen_pendukung)) {
-        $dok = $perhiasan->dokumenPendukung;
-        $dataDokumen = [];
-
-        foreach ($request->dokumen_pendukung as $key => $value) {
-            if ($request->hasFile("dokumen_pendukung.$key")) {
-                $file = $request->file("dokumen_pendukung.$key");
-                if ($file && $file->isValid()) {
-                    if ($dok && isset($dok->$key) && Storage::disk('minio')->exists($dok->$key)) {
-                        Storage::disk('minio')->delete($dok->$key);
+            foreach ($request->dokumen_pendukung as $key => $value) {
+                if ($request->hasFile("dokumen_pendukung.$key")) {
+                    $file = $request->file("dokumen_pendukung.$key");
+                    if ($file && $file->isValid()) {
+                        if ($dok && isset($dok->$key) && Storage::disk('minio')->exists($dok->$key)) {
+                            Storage::disk('minio')->delete($dok->$key);
+                        }
+                        $filename = "{$key}-" . time() . "." . $file->getClientOriginalExtension();
+                        $path = $file->storeAs("dokumen_perhiasan/{$perhiasan->id}", $filename, 'minio');
+                        $dataDokumen[$key] = $path;
                     }
-                    $filename = "{$key}-" . time() . "." . $file->getClientOriginalExtension();
-                    $path = $file->storeAs("dokumen_perhiasan/{$perhiasan->id}", $filename, 'minio');
-                    $dataDokumen[$key] = $path;
+                } else {
+                    $dataDokumen[$key] = $value;
                 }
-            } else {
-                $dataDokumen[$key] = $value;
+            }
+
+            if (!empty($dataDokumen)) {
+                DokumenPendukungEmas::updateOrCreate(
+                    ['emas_type' => 'perhiasan', 'emas_id' => $perhiasan->id],
+                    $dataDokumen
+                );
             }
         }
+    }
 
-        if (!empty($dataDokumen)) {
-            DokumenPendukungEmas::updateOrCreate(
-                ['emas_type' => 'perhiasan', 'emas_id' => $perhiasan->id],
-                $dataDokumen
-            );
+    private function syncKelengkapan($perhiasan, $request)
+    {
+        if ($request->filled('kelengkapan') && is_array($request->kelengkapan)) {
+            $ids = array_map(fn($item) => is_array($item) ? $item['id'] : $item, $request->kelengkapan);
+            $perhiasan->kelengkapan()->sync($ids);
         }
     }
-}
-
-
-private function syncKelengkapan($perhiasan, $request)
-{
-    if ($request->filled('kelengkapan') && is_array($request->kelengkapan)) {
-        // Hanya ambil id kelengkapan tanpa nominal/override
-        $ids = array_map(fn($item) => is_array($item) ? $item['id'] : $item, $request->kelengkapan);
-        $perhiasan->kelengkapan()->sync($ids);
-    }
-}
 }

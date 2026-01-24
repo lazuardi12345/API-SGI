@@ -35,12 +35,10 @@ class ApprovalFilterController extends Controller
             'retro', 
             'perpanjanganTempos'
         ])
-        // Hanya yang sudah di-approve/reject oleh kedua role
         ->whereHas('approvals', function($q){
             $q->whereIn('role', ['checker','hm'])
               ->whereIn('status', ['approved_checker','rejected_checker','approved_hm','rejected_hm']);
         })
-        // Filter bulan & tahun dari tanggal dibuatnya record
         ->whereYear('created_at', $tahun)
         ->whereMonth('created_at', $bulan)
         ->orderBy('created_at','desc');
