@@ -33,9 +33,9 @@ return [
         'http://192.182.6.107:3001',
         'http://localhost:3001',
         'http://192.182.6.69:3101',
-        'https://genetic-extension-organized-interactive.trycloudflare.com',
-        'https://rarely-manor-leisure-templates.trycloudflare.com',
-        'https://clicks-characterized-acting-shop.trycloudflare.com'
+        'https://cleaning-post-capabilities-roots.trycloudflare.com',
+        'https://genes-thumbzilla-complement-lexmark.trycloudflare.com',
+        'https://bike-revealed-basically-science.trycloudflare.com'
 
     ],
 

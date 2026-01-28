@@ -34,6 +34,7 @@ use App\Http\Controllers\LaporanHarianCheckerController;
 use App\Http\Controllers\PetugasLaporanController;
 use App\Http\Controllers\AdminLaporanMingguanController;
 use App\Http\Controllers\PelunasanController;
+use App\Http\Controllers\LaporanGudangController;
 
 use App\Events\TransaksiBaru;
 // ================== AUTH ================== //
@@ -44,6 +45,7 @@ Route::post('/register', [AuthController::class, 'register'])->name('auth.regist
 Route::post('/login', [AuthController::class, 'login'])->name('auth.login');
 Route::get('/v1/verify-report/{doc_id}', [LaporanHarianCheckerController::class, 'publicVerify']);
 Route::get('/v1/verify-sbg/{no_gadai}', [DetailGadaiController::class, 'publicVerifySBG']);
+
 
 Route::get('/files/{path}', [App\Http\Controllers\StorageController::class, 'get'])
     ->where('path', '.*')
@@ -75,12 +77,45 @@ Route::get('/test-notification', function() {
     ]);
 });
 
+
+
+Route::get('/test-nestjs-connection', function() {
+    $controller = app(NotificationServiceController::class);
+    $result = $controller->testConnection();
+    
+    return response()->json($result);
+});
+
+Route::post('/test-send-notification', function() {
+    $controller = app(NotificationServiceController::class);
+    
+    $result = $controller->sendNotification([
+        'type' => 'UNIT_VALIDATED',
+        'user_id' => auth()->id() ?? 1,
+        'no_gadai' => 'TEST-' . now()->format('YmdHis'),
+        'nama_nasabah' => 'Test User',
+        'title' => 'Test Notification',
+        'message' => 'This is a test notification from Laravel',
+        'status_transaksi' => 'selesai',
+        'nominal_cair' => 1000000,
+    ]);
+    
+    return response()->json($result);
+});
+
 Route::get('/test-lunas', function () {
     event(new TransaksiBaru("Ini tes notifikasi Lunas", "Lunas", "SGI-TEST-002"));
     return "Notif Lunas terkirim!";
 });
 
 Route::middleware('auth:api')->post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
+
+Route::middleware(['auth:api'])->group(function () {
+    Route::get('all/gudang/riwayat', [LaporanGudangController::class, 'index']);
+    Route::get('all/gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
+    Route::get('all/gudang/riwayat/{id}', [LaporanGudangController::class, 'show']);
+});
+
 
 // ================== PETUGAS ================== //
 // hanya GET (index/show) dan POST (store)
@@ -239,6 +274,13 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::get('/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
     Route::get('/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
     Route::get('/rekap-bulanan-lelang', [AdminLaporanMingguanController::class, 'rekapBulananPelelangan']);
+    Route::post('hm/gudang/scan', [LaporanGudangController::class, 'scanBarcode']);
+    Route::get('hm/gudang/riwayat', [LaporanGudangController::class, 'index']);
+    Route::get('hm/gudang/riwayat/{id}', [LaporanGudangController::class, 'show']);
+    Route::delete('hm/gudang/riwayat/{id}', [LaporanGudangController::class, 'destroy']);
+    Route::get('hm/gudang/report/export', [LaporanGudangController::class, 'exportReport']);
+    Route::post('hm/gudang/verifikasi', [LaporanGudangController::class, 'storeVerifikasi']); 
+    Route::get('hm/gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
 
 });
 
@@ -265,18 +307,13 @@ Route::middleware(['auth:api', 'role:checker'])->group(function () {
     Route::get('checker/harga-hp/type/{typeHpId}', [HargaHpController::class, 'getByType']);
     Route::get('checker/type-hp/by-merk/{merkId}', [TypeHpController::class, 'getByMerk']);
     Route::get('checker/harga-hp/by-type/{typeHpId}', [HargaHpController::class, 'getByType']);
-    
-    // Grade HP - Full CRUD + Calculation Tools
     Route::apiResource('checker/grade-hp', GradeHpController::class);
     Route::get('checker/grade-hp/harga/{hargaHpId}', [GradeHpController::class, 'getByHargaHp']);
     Route::get('checker/grade-hp/by-merk/{merkId}', [GradeHpController::class, 'getByMerk']);
     Route::get('checker/type-hp/{typeId}/grade', [HargaHpController::class, 'getGradeByType']);
-    
-    // Grade Calculation Tools
     Route::post('checker/grade-hp/preview', [GradeHpController::class, 'previewCalculation']);
     Route::put('checker/grade-hp/{id}/manual', [GradeHpController::class, 'updateManual']);
     Route::post('checker/grade-hp/recalculate/{hargaHpId}', [GradeHpController::class, 'recalculateByHargaHp']);
-
     Route::post('checker/gadai-wizard', [GadaiWizardController::class, 'store']);
     Route::post('checker/gadai-emas', [GadaiEmasController::class, 'store']);
     Route::patch('checker/detail-gadai/{id}/validasi-selesai', [DetailGadaiController::class, 'validasiSelesai']);
@@ -302,18 +339,14 @@ Route::middleware(['auth:api', 'role:checker'])->group(function () {
     Route::post('checker/pelelangan/{detail_gadai_id}/lunasi', [PelelanganController::class, 'lunasi']);
     Route::get('checker/pelelangan', [PelelanganController::class, 'index']);
     Route::get('checker/pelelangan/{detail_gadai_id}', [PelelanganController::class, 'show']);
-
-        // Gadai Ulang (Nasabah Lama)
     Route::post('checker/gadai/ulang', [GadaiUlangController::class, 'store']);
-    
-    // Cek Nasabah by NIK (untuk validasi sebelum gadai ulang)
     Route::post('checker/gadai/ulang/check-nasabah', [GadaiUlangController::class, 'checkNasabah']);
 
     Route::post('checker/gadai/ulang-emas', [GadaiUlangEmasController::class, 'store']);
     Route::post('checker/gadai/ulang-emas/check-nasabah', [GadaiUlangEmasController::class, 'checkNasabah']);
     Route::get('checker/brankas', [BrankasController::class, 'index']);
-    Route::get('checker/brankas/riwayat', [BrankasController::class, 'riwayat']);
-    Route::post('checker/brankas/transaksi', [BrankasController::class, 'store']);
+    // Route::get('checker/brankas/riwayat', [BrankasController::class, 'riwayat']);
+    // Route::post('checker/brankas/transaksi', [BrankasController::class, 'store']);
     Route::get('checker/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
     Route::get('checker/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
     Route::get('checker/harian/cetak-serah-terima', [LaporanHarianCheckerController::class, 'cetakLaporanSerahTerima']);
@@ -359,5 +392,25 @@ Route::middleware(['auth:api', 'role:admin'])->group(function () {
     Route::get('admin/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
     Route::get('admin/rekap-bulanan-lelang', [AdminLaporanMingguanController::class, 'rekapBulananPelelangan']);
 
+});
+
+Route::middleware(['auth:api', 'role:gudang'])->group(function () {
+    Route::post('gudang/scan', [LaporanGudangController::class, 'scanBarcode']);
+    Route::post('gudang/verifikasi', [LaporanGudangController::class, 'storeVerifikasi']); 
+    Route::get('gudang/riwayat', [LaporanGudangController::class, 'index']);
+    Route::get('gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
+    Route::get('gudang/riwayat/{id}', [LaporanGudangController::class, 'show']);
+    Route::delete('gudang/riwayat/{id}', [LaporanGudangController::class, 'destroy']);
+    Route::get('gudang/report/export', [LaporanGudangController::class, 'exportReport']);
+});
+
+
+Route::middleware(['auth:api', 'role:kasir'])->group(function () {
+
+    Route::get('kasir/brankas', [BrankasController::class, 'index']);
+    Route::get('kasir/brankas/riwayat', [BrankasController::class, 'riwayat']);
+    Route::post('kasir/brankas/transaksi', [BrankasController::class, 'store']);
+    Route::get('kasir/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
+    Route::get('kasir/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
 
 });

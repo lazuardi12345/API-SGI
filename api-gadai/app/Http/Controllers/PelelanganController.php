@@ -12,12 +12,15 @@ use Illuminate\Support\Facades\DB;
 class PelelanganController extends Controller
 {
 
-    public function index()
+public function index()
     {
         $today = Carbon::today()->startOfDay();
+        // Syarat muncul di list: Sudah lewat 15 hari dari jatuh tempo
         $batasMinimalLelang = $today->copy()->subDays(15);
 
         $lelangables = DetailGadai::with(['nasabah', 'type', 'pelelangan'])
+            ->where('status', '!=', 'lunas') // ✅ PENTING: Jangan tampilkan yang sudah lunas
+            ->where('status', '!=', 'terlelang') // ✅ PENTING: Jangan tampilkan yang sudah laku dilelang
             ->whereDate('jatuh_tempo', '<=', $batasMinimalLelang)
             ->where(function($q) {
                 $q->whereHas('pelelangan', function($query) {
@@ -70,16 +73,18 @@ class PelelanganController extends Controller
         }
 
         $pelelangan = Pelelangan::create([
-            'detail_gadai_id' => $detail->id,
-            'status_lelang' => 'siap',
-            'keterangan' => 'Barang terdaftar untuk dilelang',
-        ]);
+        'detail_gadai_id' => $detail->id,
+        'status_lelang' => 'siap',
+        'keterangan' => 'Barang terdaftar untuk dilelang',
+    ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Barang berhasil masuk daftar lelang',
-            'data' => $pelelangan
-        ]);
+    $this->notifService->notifyBarangLelang($pelelangan);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Barang berhasil masuk daftar lelang & Notifikasi terkirim',
+        'data' => $pelelangan
+    ]);
     }
 
 

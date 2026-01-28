@@ -108,4 +108,9 @@ public function pelelangan()
     return $this->hasOne(Barang::class, 'detail_gadai_id');
 }
 
+public function laporanGudang()
+{
+    return $this->hasMany(LaporanGudang::class, 'detail_gadai_id');
+}
+
 }

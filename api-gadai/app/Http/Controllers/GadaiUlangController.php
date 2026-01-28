@@ -155,11 +155,9 @@ class GadaiUlangController extends Controller
                 try {
                 $notificationService = app(\App\Services\NotificationService::class);
                 
-                // Hitung total gadai untuk menentukan apakah ini repeat order
                 $totalGadaiNasabah = DetailGadai::where('nasabah_id', $nasabah->id)->count();
 
                 if ($totalGadaiNasabah > 1) {
-                    // Pastikan dikirim sebagai Repeat Order jika sudah pernah gadai sebelumnya
                     $notificationService->notifyRepeatOrder($detail, $totalGadaiNasabah);
                 } else {
                     // Jaga-jaga jika data nasabah baru tapi masuk lewat wizard ini

@@ -251,29 +251,18 @@ public function pelunasan(Request $request, $id)
 public function show($id)
 {
     $gadai = DetailGadai::with([
-        'type', 
-        'nasabah.user', 
-        'hp.merk', 
-        'hp.type_hp', 
-        'hp.kerusakanList', 
-        'hp.kelengkapanList',
-        'hp.dokumenPendukungHp',      
-        'perhiasan.kelengkapan',   
-        'perhiasan.dokumenPendukung',    
-        'logamMulia.kelengkapanEmas', 
-        'logamMulia.dokumenPendukung',    
-        'retro.kelengkapan', 
-        'retro.dokumenPendukung',         
-        'approvals.user',
-        'perpanjangan_tempos' 
+        'type', 'nasabah.user', 'hp.merk', 'hp.type_hp', 
+        'hp.kerusakanList', 'hp.kelengkapanList', 'hp.dokumenPendukungHp',      
+        'perhiasan.kelengkapan', 'perhiasan.dokumenPendukung',    
+        'logamMulia.kelengkapanEmas', 'logamMulia.dokumenPendukung',    
+        'retro.kelengkapan', 'retro.dokumenPendukung',         
+        'approvals.user', 'perpanjangan_tempos' 
     ])->find($id);
 
     if (!$gadai) {
-        return response()->json([
-            'success' => false, 
-            'message' => 'Data tidak ditemukan.'
-        ], 404);
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
     }
+
     $hariKeterlambatan = $this->calculateLateDays($gadai);
     $pelunasanService = new \App\Services\PelunasanService();
     
@@ -293,27 +282,32 @@ public function show($id)
 
     $isApproved = ($gadai->approval_status === 'approved');
     $qrCodeBase64 = null;
+    $qrGudangBase64 = null; 
 
     if ($isApproved) {
         $verifyUrl = url("/api/v1/verify-sbg/" . $gadai->no_gadai);
-        $qrCodeRaw = \QrCode::format('png')
-            ->size(200)
-            ->margin(1)
-            ->errorCorrection('H')
-            ->generate($verifyUrl);
+        $qrCodeRaw = QrCode::format('png')->size(200)->margin(1)->generate($verifyUrl);
         $qrCodeBase64 = 'data:image/png;base64,' . base64_encode($qrCodeRaw);
+        $qrGudangRaw = QrCode::format('png')->size(200)->margin(1)->generate($gadai->no_gadai); 
+        $qrGudangBase64 = 'data:image/png;base64,' . base64_encode($qrGudangRaw);
+
     }
 
-    $dataResponse = $gadai->toArray();
+    $dataResponse = $gadai->toArray(); 
     $dataResponse['hari_keterlambatan'] = $hariKeterlambatan;
     $dataResponse['perhitungan'] = $perhitungan; 
     $dataResponse['is_overdue'] = $hariKeterlambatan > 0;
     $dataResponse['is_approved'] = $isApproved; 
+
+
     $dataResponse['metadata'] = [
-        'qr_code'     => $qrCodeBase64,
-        'checker_name'=> $isApproved ? ($gadai->approvals->where('role', 'checker')->first()->user->name ?? 'Checker SGI') : null,
-        'acc_at'      => $isApproved ? $gadai->updated_at->format('d-m-Y H:i') : null,
+        'qr_code'      => $qrCodeBase64,
+        'qr_gudang'    => $qrGudangBase64, 
+        'checker_name' => $isApproved ? ($gadai->approvals->where('role', 'checker')->first()->user->name ?? 'Checker SGI') : null,
+        'acc_at'       => $isApproved ? $gadai->updated_at->format('d-m-Y H:i') : null,
     ];
+
+    // Dokumen pendukung logic
     if ($gadai->hp && $gadai->hp->dokumenPendukungHp) {
         $dataResponse['dokumen_pendukung_hp'] = $gadai->hp->dokumenPendukungHp;
     }
@@ -438,21 +432,65 @@ public function approveSBG(Request $request, $id)
 
 public function ajukanSBG(Request $request, $id)
 {
-    $gadai = DetailGadai::findOrFail($id);
-    $allowedStatuses = ['proses', 'selesai'];
+    // Load detail gadai beserta tipenya
+    $gadai = DetailGadai::with('type')->findOrFail($id);
 
-    if (!in_array($gadai->status, $allowedStatuses)) {
+    /**
+     * SYARAT 1: STATUS HARUS 'selesai'
+     * Artinya sudah divalidasi oleh Checker.
+     * Jika masih 'proses', berarti Checker belum ACC fisik barangnya.
+     */
+    if ($gadai->status !== 'selesai') {
         return response()->json([
             'success' => false, 
-            'message' => 'Status gadai harus "proses" atau "selesai" untuk diajukan.'
+            'message' => 'SBG belum bisa diajukan. Pastikan Checker sudah memvalidasi (Status harus SELESAI).'
         ], 400);
     }
 
-    $gadai->update(['approval_status' => 'pending']);
+    $nominal = (float) $gadai->uang_pinjaman;
+    $namaType = strtolower($gadai->type->nama_type ?? ''); 
+    $isAutoApprove = false;
+
+    // --- LOGIKA AUTO APPROVAL BERDASARKAN NOMINAL ---
+    
+    // 1. Kategori HP/Handphone (Limit <= 2 Juta)
+    if (str_contains($namaType, 'hp') || str_contains($namaType, 'handphone')) {
+        if ($nominal <= 2000000) {
+            $isAutoApprove = true;
+        }
+    } 
+    // 2. Kategori EMAS (Logam Mulia, Perhiasan, Emas - Limit <= 4 Juta)
+    else if (
+        str_contains($namaType, 'logam_mulia') || 
+        str_contains($namaType, 'retro') || 
+        str_contains($namaType, 'emas') || 
+        str_contains($namaType, 'perhiasan')
+    ) {
+        if ($nominal <= 4000000) {
+            $isAutoApprove = true;
+        }
+    }
+
+    // --- EKSEKUSI STATUS APPROVAL ---
+
+    if ($isAutoApprove) {
+        // Jika nominal kecil, langsung tembus ke 'approved'
+        $gadai->update([
+            'approval_status' => 'approved'
+        ]);
+        $msg = "SBG [{$gadai->no_gadai}] disetujui otomatis oleh sistem.";
+    } else {
+        // Jika nominal besar, status jadi 'pending' untuk divalidasi Manager (HM)
+        $gadai->update([
+            'approval_status' => 'pending'
+        ]);
+        $msg = "SBG [{$gadai->no_gadai}] telah diajukan ke Manager (Limit Besar).";
+    }
 
     return response()->json([
         'success' => true,
-        'message' => "SBG {$gadai->no_gadai} berhasil diajukan untuk approval."
+        'message' => $msg,
+        'is_auto' => $isAutoApprove
     ]);
 }
 

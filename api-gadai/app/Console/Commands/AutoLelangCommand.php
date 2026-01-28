@@ -20,26 +20,34 @@ class AutoLelangCommand extends Command
      */
     protected $description = 'Command description';
 
-    /**
-     * Execute the console command.
-     */
-    public function handle()
+public function handle()
 {
-    // 1. Cari data gadai yang melewati jatuh tempo DAN belum masuk pelelangan
-    $dataJatuhTempo = DetailGadai::where('tanggal_jatuh_tempo', '<', now())
+    $notif = app(\App\Services\NotificationService::class);
+    $today = \Carbon\Carbon::today()->startOfDay();
+    $batasMinimalLelang = $today->copy()->subDays(15);
+    $dataJatuhTempo = \App\Models\DetailGadai::whereDate('jatuh_tempo', '<=', $batasMinimalLelang)
+        ->whereNotIn('status', ['lunas', 'terlelang', 'selesai']) 
         ->whereDoesntHave('pelelangan')
         ->get();
 
+    if ($dataJatuhTempo->isEmpty()) {
+        $this->info('Tidak ada barang baru yang memenuhi syarat lelang hari ini.');
+        return;
+    }
+
     foreach ($dataJatuhTempo as $item) {
-        // 2. Masukkan ke tabel pelelangan
-        Pelelangan::create([
-            'detail_gadai_id' => $item->id,
-            'status_lelang'   => 'proses',
-            'tanggal_dilelang' => now(),
-            'keterangan'      => 'Otomatis masuk lelang karena jatuh tempo'
-        ]);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($item, $notif) {
+            $pelelangan = \App\Models\Pelelangan::create([
+                'detail_gadai_id' => $item->id,
+                'status_lelang'   => 'siap',
+                'keterangan'      => 'Otomatis masuk daftar lelang (Toleransi 15 hari jatuh tempo)'
+            ]);
+            $notif->notifyBarangLelang($pelelangan);
+        });
+        
+        $this->info("Berhasil didaftarkan lelang & notif terkirim: {$item->no_gadai}");
     }
     
-    $this->info('Data lelang berhasil diperbarui.');
+    $this->info('Proses Auto-Lelang & Notifikasi selesai.');
 }
 }

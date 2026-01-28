@@ -14,7 +14,10 @@ class Kernel extends ConsoleKernel
 {
     // Baris ini yang benar tempatnya di Laravel 10
     $schedule->command('app:auto-lelang-command')->daily();
+     $schedule->command('app:reminder-jatuh-tempo')->dailyAt('08:00');
 }
+
+
 
     /**
      * Register the commands for the application.
@@ -25,4 +28,6 @@ class Kernel extends ConsoleKernel
 
         require base_path('routes/console.php');
     }
+
+    
 }
