@@ -135,69 +135,69 @@ class NotificationService
         return $result;
     }
 
-    public function notifyBarangLelang($pelelangan)
-    {
-        $pelelangan->loadMissing(['detailGadai.nasabah']);
-        $gadai = $pelelangan->detailGadai;
-        $namaNasabah = $gadai->nasabah->nama_lengkap ?? 'Tanpa Nama';
-        
-        $kalkulasi = app(\App\Http\Controllers\PelelanganController::class)->hitungKalkulasi($gadai);
+public function notifyBarangLelang($pelelangan)
+{
+    // 1. Load data dengan aman
+    $pelelangan->loadMissing(['detailGadai.nasabah']);
+    $gadai = $pelelangan->detailGadai;
+    
+    if (!$gadai) {
+        Log::error('❌ [ITEM_AUCTIONED] Gadai data not found for Pelelangan ID: ' . $pelelangan->id);
+        return ['success' => false, 'message' => 'Data gadai tidak ditemukan'];
+    }
 
-        Log::info('🔔 [ITEM_AUCTIONED] Preparing notification', [
-            'no_gadai' => $gadai->no_gadai,
-            'total_hutang' => $kalkulasi['total_hutang']
+    $namaNasabah = $gadai->nasabah->nama_lengkap ?? 'Tanpa Nama';
+    
+    // 2. Proteksi hitungKalkulasi agar tidak bikin crash
+    try {
+        $pelelanganController = app(\App\Http\Controllers\PelelanganController::class);
+        $kalkulasi = $pelelanganController->hitungKalkulasi($gadai);
+        $totalHutang = $kalkulasi['total_hutang'] ?? 0;
+        $totalHutangFormatted = "Rp " . number_format($totalHutang, 0, ',', '.');
+    } catch (\Exception $e) {
+        Log::warning('⚠️ [ITEM_AUCTIONED] Gagal hitung kalkulasi: ' . $e->getMessage());
+        $totalHutang = 0;
+        $totalHutangFormatted = "Cek detail";
+    }
+
+    Log::info('🔔 [ITEM_AUCTIONED] Preparing notification', [
+        'no_gadai' => $gadai->no_gadai,
+        'total_hutang' => $totalHutang
+    ]);
+
+    // 3. Kirim ke Controller Service dengan format yang pas
+    return $this->controller->sendNotification([
+        'user_id'          => (int) auth()->id() ?? 0, 
+        'no_gadai'         => (string) $gadai->no_gadai,
+        'nama_nasabah'     => $namaNasabah,
+        'title'            => '⚠️ Barang Masuk Daftar Lelang',
+        'message'          => "Unit {$gadai->no_gadai} ({$namaNasabah}) telah masuk daftar lelang. Total Hutang: {$totalHutangFormatted}",
+        'status_transaksi' => 'lelang',
+        'type'             => 'ITEM_AUCTIONED', 
+        'url'              => "/lelang/detail/{$gadai->id}",
+        'total_gadai'      => (int) $totalHutang // Biar NestJS dapet angka murninya juga
+    ]);
+}
+
+    public function notifyDueDateReminder($payload)
+    {
+        Log::info('🔔 [DUE_DATE_REMINDER] Preparing notification', [
+            'no_gadai' => $payload['no_gadai'],
+            'label' => $payload['title']
         ]);
 
         $result = $this->controller->sendNotification([
-            'user_id'          => (int) auth()->id() ?? 0, 
-            'no_gadai'         => (string) $gadai->no_gadai,
-            'nama_nasabah'     => $namaNasabah,
-            'title'            => '⚠️ Barang Masuk Daftar Lelang',
-            'message'          => "Unit {$gadai->no_gadai} ({$namaNasabah}) telah masuk daftar lelang. Total Hutang: Rp " . number_format($kalkulasi['total_hutang'], 0, ',', '.'),
-            'status_transaksi' => 'lelang',
-            'type'             => 'ITEM_AUCTIONED', 
-            'url'              => "/lelang/detail/{$gadai->id}"
-        ]);
-
-        Log::info('📤 [ITEM_AUCTIONED] Notification result', ['result' => $result]);
-        return $result;
-    }
-
-    public function notifyDueDateReminder($detailGadai)
-    {
-        $detailGadai->loadMissing('nasabah');
-        $namaNasabah = $detailGadai->nasabah->nama_lengkap ?? 'Tanpa Nama';
-        $today = \Carbon\Carbon::today();
-        $jatuhTempo = \Carbon\Carbon::parse($detailGadai->jatuh_tempo);
-        
-        // Tentukan Label dan Pesan berdasarkan selisih hari
-        $diff = $today->diffInDays($jatuhTempo, false);
-        
-        if ($diff == 3) {
-            $title = "⏳ 3 Days Until Due Date";
-            $message = "Reminder: Customer {$namaNasabah} ({$detailGadai->no_gadai}) is due on " . $jatuhTempo->format('d-M-Y');
-        } elseif ($diff == 0) {
-            $title = "🚨 DUE DATE TODAY";
-            $message = "Urgent: {$namaNasabah} ({$detailGadai->no_gadai}) reaches due date today. Please contact for payment.";
-        } else {
-            $title = "⚠️ OVERDUE (H+3)";
-            $message = "Alert: {$detailGadai->no_gadai} ({$namaNasabah}) is 3 days past due. Action required.";
-        }
-
-        Log::info('🔔 [DUE_DATE_REMINDER] Preparing notification', [
-            'no_gadai' => $detailGadai->no_gadai,
-            'diff_days' => $diff
-        ]);
-
-        return $this->controller->sendNotification([
-            'user_id'          => 0, // System generated (Cron Job)
-            'no_gadai'         => (string) $detailGadai->no_gadai,
-            'nama_nasabah'     => $namaNasabah,
-            'title'            => $title,
-            'message'          => $message,
+            'user_id'          => 0, 
+            'no_gadai'         => (string) $payload['no_gadai'],
+            'nama_nasabah'     => (string) $payload['nama_nasabah'],
+            'title'            => (string) $payload['title'],
+            'message'          => (string) $payload['message'],
             'status_transaksi' => 'reminder',
             'type'             => 'DUE_DATE_REMINDER', 
-            'url'              => "/gadai/detail/{$detailGadai->id}"
+            'url'              => (string) $payload['url']
         ]);
+
+        Log::info('📤 [DUE_DATE_REMINDER] Notification result', ['result' => $result]);
+        return $result;
     }
 }

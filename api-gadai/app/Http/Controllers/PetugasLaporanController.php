@@ -13,7 +13,7 @@ class PetugasLaporanController extends Controller
 {
     use ReportHelper;
 
-   public function cetakLaporanHarian(Request $request)
+public function cetakLaporanHarian(Request $request)
     {
         try {
             $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();

@@ -9,6 +9,7 @@ use Carbon\Carbon;
 
 class ReminderJatuhTempoCommand extends Command
 {
+    // Nama command tetap sama agar tidak perlu ubah Kernel
     protected $signature = 'app:reminder-jatuh-tempo';
     protected $description = 'Kirim notifikasi pengingat jatuh tempo H-3, Hari H, dan H+3';
 
@@ -17,50 +18,29 @@ class ReminderJatuhTempoCommand extends Command
         $notif = app(NotificationService::class);
         $today = Carbon::today();
 
-        // Target tanggal yang kita cari
-        $targets = [
-            'H-3' => $today->copy()->addDays(3), 
-            'H-0' => $today->copy(),             
-            'H+3' => $today->copy()->subDays(3), 
+
+        $targetDates = [
+            $today->copy()->addDays(3)->format('Y-m-d'),  
+            $today->copy()->format('Y-m-d'),             
+            $today->copy()->subDays(3)->format('Y-m-d'),  
         ];
 
-        foreach ($targets as $label => $date) {
-            $items = DetailGadai::with(['nasabah'])
-                ->whereDate('jatuh_tempo', $date->format('Y-m-d'))
-                ->where('status', 'selesai') 
-                ->get();
+        $items = DetailGadai::with(['nasabah'])
+            ->whereIn('jatuh_tempo', $targetDates)
+            ->where('status', 'selesai') 
+            ->get();
 
-            foreach ($items as $item) {
-                $this->sendReminder($notif, $item, $label);
-            }
+        if ($items->isEmpty()) {
+            $this->info('Tidak ada jadwal pengingat jatuh tempo untuk hari ini.');
+            return;
+        }
+
+        foreach ($items as $item) {
+            $notif->notifyDueDateReminder($item);
+            
+            $this->info("Notifikasi dikirim untuk: {$item->no_gadai} (Jatuh Tempo: {$item->jatuh_tempo})");
         }
 
         $this->info('Semua pengingat telah diproses.');
-    }
-
-    private function sendReminder($notif, $item, $label)
-    {
-        $nama = $item->nasabah->nama_lengkap ?? 'Nasabah';
-        
-        $payload = [
-            'type' => 'REMINDER_JATUH_TEMPO',
-            'no_gadai' => $item->no_gadai,
-            'nama_nasabah' => $nama,
-            'status_transaksi' => $item->status,
-        ];
-
-        if ($label === 'H-3') {
-            $payload['title'] = "⏳ 3 Hari Lagi Jatuh Tempo";
-            $payload['message'] = "Mengingatkan nasabah {$nama} ({$item->no_gadai}) akan jatuh tempo pada " . Carbon::parse($item->jatuh_tempo)->format('d-m-Y');
-        } elseif ($label === 'H-0') {
-            $payload['title'] = "🚨 HARI INI JATUH TEMPO";
-            $payload['message'] = "Segera hubungi {$nama} ({$item->no_gadai}) untuk pelunasan atau perpanjangan hari ini.";
-        } else { // H+3
-            $payload['title'] = "⚠️ LEWAT JATUH TEMPO (H+3)";
-            $payload['message'] = "Gadai {$item->no_gadai} ({$nama}) sudah lewat 3 hari. Segera tindak lanjuti sebelum masuk daftar lelang.";
-        }
-
-        $notif->controller->sendNotification($payload);
-        $this->info("Kirim {$label} untuk {$item->no_gadai}");
     }
 }

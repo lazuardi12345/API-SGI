@@ -33,9 +33,9 @@ return [
         'http://192.182.6.107:3001',
         'http://localhost:3001',
         'http://192.182.6.69:3101',
-        'https://cleaning-post-capabilities-roots.trycloudflare.com',
-        'https://genes-thumbzilla-complement-lexmark.trycloudflare.com',
-        'https://bike-revealed-basically-science.trycloudflare.com'
+        'https://sky-attend-phillips-cpu.trycloudflare.com',
+        'https://recruiting-classes-periodic-respiratory.trycloudflare.com',
+        'https://algebra-cruise-routing-hansen.trycloudflare.com'
 
     ],
 

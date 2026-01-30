@@ -29,19 +29,19 @@ class User extends Authenticatable implements JWTSubject
     return 'pawn-apps';
 }
 
-    public function getRoleNameAttribute(): string
-    {
-        $map = [
-            self::ROLE_HM      => 'Head Marketing',
-            self::ROLE_ADMIN   => 'Administrator',
-            self::ROLE_CHECKER => 'Kepala Toko',
-            self::ROLE_PETUGAS => 'Petugas Lapangan',
-            self::ROLE_GUDANG  => 'Staff Gudang',
-            self::ROLE_KASIR   => 'Kasir',
-        ];
+public function getRoleNameAttribute(): ?string 
+{
+    $map = [
+        self::ROLE_HM      => 'Head Marketing',
+        self::ROLE_ADMIN   => 'Administrator',
+        self::ROLE_CHECKER => 'Kepala Toko',
+        self::ROLE_PETUGAS => 'Petugas Lapangan',
+        self::ROLE_GUDANG  => 'Staff Gudang',
+        self::ROLE_KASIR   => 'Kasir',
+    ];
 
-        return $map[$this->role] ?? $this->role;
-    }
+    return $map[$this->role] ?? $this->role ?? '-'; 
+}
 
     public function getJWTIdentifier() { return $this->getKey(); }
 

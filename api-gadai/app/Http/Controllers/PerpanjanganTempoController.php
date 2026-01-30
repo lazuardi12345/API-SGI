@@ -51,18 +51,40 @@ public function store(Request $request)
         return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
     }
 
-    $gadai = DetailGadai::with('type')->findOrFail($request->detail_gadai_id);
+    // 1. PERBAIKAN: Gunakan 'perpanjanganTempo' (sesuai Model terbaru lo)
+    // Atau pakai 'perpanjangan_tempo' jika lo sudah tambah alias di Model.
+    $gadai = DetailGadai::with(['type', 'perpanjanganTempo'])->findOrFail($request->detail_gadai_id);
 
-    $pokok = (float) $gadai->uang_pinjaman;
     $typeNama = strtolower($gadai->type->nama_type ?? '');
-    
+    $isHandphoneElektronik = in_array($typeNama, ['handphone', 'hp', 'elektronik']);
+
     $tglExtend = Carbon::parse($request->tanggal_perpanjangan);
     $jtLama = Carbon::parse($gadai->jatuh_tempo); 
     $jtBaru = Carbon::parse($request->jatuh_tempo_baru);
+
+    // --- VALIDASI AKUMULASI MAX 90 HARI (HANYA UNTUK HP/ELEKTRONIK) ---
+    if ($isHandphoneElektronik) {
+        $durasiBaru = $tglExtend->diffInDays($jtBaru);
+
+        // 2. PERBAIKAN: Sesuaikan nama relasi di sini juga
+        $totalDurasiLama = $gadai->perpanjanganTempo->sum(function($item) {
+            return Carbon::parse($item->tanggal_perpanjangan)->diffInDays(Carbon::parse($item->jatuh_tempo_baru));
+        });
+
+        if (($totalDurasiLama + $durasiBaru) > 90) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Perpanjangan sudah melebihi kapasitas maksimal 90 hari untuk unit Handphone/Elektronik.'
+            ], 422);
+        }
+    }
+
+    $pokok = (float) $gadai->uang_pinjaman;
+    
     $totalTelat = max(0, $jtLama->diffInDays($tglExtend, false));
     $periodeBaruHari = max(0, $tglExtend->diffInDays($jtBaru, false));
 
-    $isHandphoneElektronik = in_array($typeNama, ['handphone', 'hp', 'elektronik']);
+    // Hitung Jasa
     $jasa = 0;
     if ($isHandphoneElektronik) {
         $rateJasa = ($periodeBaruHari <= 15) ? 0.045 : 0.095;
@@ -72,29 +94,51 @@ public function store(Request $request)
         $jasa = $pokok * $rateJasa;
     }
 
+    // Hitung Denda & Penalty
     $rateDenda = 0.001; 
     $denda = $pokok * $rateDenda * $totalTelat;
-
     $penalty = ($totalTelat > 15) ? 180000 : 0;
 
+    // Biaya Admin (Non-HP)
     $adminFinal = 0;
     if (!$isHandphoneElektronik) {
         $adminBase = $pokok * 0.01; 
         $adminMin = 10000;
         $adminFinal = max($adminBase, $adminMin);
     }
+    
     $totalSemua = ceil(($jasa + $denda + $penalty + $adminFinal) / 1000) * 1000;
 
-    $perpanjangan = PerpanjanganTempo::create([
-        'detail_gadai_id'      => $request->detail_gadai_id,
-        'tanggal_perpanjangan' => $request->tanggal_perpanjangan,
-        'jatuh_tempo_baru'     => $request->jatuh_tempo_baru,
-        'nominal_admin'        => $totalSemua, 
-        'status_bayar'         => 'pending',
-    ]);
+    // 3. GUNAKAN TRANSACTION: Biar kalau salah satu gagal, semua batal.
+    DB::beginTransaction();
+    try {
+        $perpanjangan = PerpanjanganTempo::create([
+            'detail_gadai_id'      => $request->detail_gadai_id,
+            'tanggal_perpanjangan' => $request->tanggal_perpanjangan,
+            'jatuh_tempo_baru'     => $request->jatuh_tempo_baru,
+            'nominal_admin'        => $totalSemua, 
+            'status_bayar'         => 'pending',
+        ]);
 
-    return response()->json(['success' => true, 'data' => $perpanjangan], 201);
+        // JANGAN UPDATE jatuh_tempo DI SINI! 
+        // Logikanya: Jatuh tempo di master gadai hanya update kalau sudah LUNAS pembayarannya.
+        // Tapi kalau lo mau update pas ajuin (pending) ya silakan, cuma berisiko kalau gak jadi bayar.
+        
+        DB::commit();
+
+        return response()->json([
+            'success' => true, 
+            'message' => 'Perpanjangan berhasil diajukan. Silakan lakukan pembayaran.',
+            'data' => $perpanjangan
+        ], 201);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+    }
 }
+
+
 public function bayarPerpanjangan(Request $request, $id)
     {
         $perpanjangan = PerpanjanganTempo::with(['detailGadai.nasabah', 'detailGadai.type'])->findOrFail($id);

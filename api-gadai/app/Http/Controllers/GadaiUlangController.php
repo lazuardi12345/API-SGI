@@ -12,6 +12,7 @@ use App\Models\Type;
 use App\Models\HargaHp;
 use App\Models\GradeHp;
 use App\Models\DokumenPendukungHp;
+use Carbon\Carbon;
 
 class GadaiUlangController extends Controller
 {
@@ -20,40 +21,39 @@ class GadaiUlangController extends Controller
         'Samsung' => ['body','imei','about','samsung_account','admin','cam_depan','cam_belakang','galaxy_store'],
         'iPhone'  => ['body','imei','about','icloud','battery','3utools','iunlocker','cek_pencurian'],
     ];
+public function checkNasabah(Request $request)
+{
+    $nik = $request->input('nik');
+    if (!$nik) return response()->json(['success' => false, 'message' => 'NIK wajib diisi.'], 422);
 
-    public function checkNasabah(Request $request)
-    {
-        $nik = $request->input('nik');
+    $nasabah = DataNasabah::where('nik', $nik)->first();
+    if (!$nasabah) return response()->json(['success' => false, 'message' => 'Nasabah belum terdaftar.'], 404);
+    $gadaiBerjalan = DetailGadai::where('nasabah_id', $nasabah->id)
+        ->whereHas('type', function($q) {
+            $q->where('nama_type', 'like', '%hp%')
+              ->orWhere('nama_type', 'like', '%handphone%');
+        })
+        ->where('status', '!=', 'lunas')
+        ->count();
 
-        if (!$nik) {
-            return response()->json(['success' => false, 'message' => 'NIK wajib diisi.'], 422);
-        }
+    $riwayatGadai = DetailGadai::where('nasabah_id', $nasabah->id)
+        ->with(['hp'])
+        ->orderBy('created_at', 'desc')
+        ->get();
 
-        $nasabah = DataNasabah::where('nik', $nik)->first();
-
-        if (!$nasabah) {
-            return response()->json(['success' => false, 'message' => 'Nasabah belum terdaftar.'], 404);
-        }
-
-        $riwayatGadai = DetailGadai::where('nasabah_id', $nasabah->id)
-            ->with(['hp'])
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Nasabah ditemukan.',
-            'data' => [
-                'nasabah' => $nasabah,
-                'total_gadai' => $riwayatGadai->count(),
-                'riwayat_gadai' => $riwayatGadai
-            ]
-        ]);
-    }
+    return response()->json([
+        'success' => true,
+        'data' => [
+            'nasabah' => $nasabah,
+            'total_gadai' => $riwayatGadai->count(),
+            'gadai_berjalan' => $gadaiBerjalan,
+            'riwayat_gadai' => $riwayatGadai
+        ]
+    ]);
+}
 
     public function store(Request $request)
     {
-
         $validator = Validator::make($request->all(), [
             'nasabah.id'           => 'required|exists:data_nasabah,id', 
             'barang.type_hp_id'    => 'required|exists:type_hp,id',
@@ -67,10 +67,32 @@ class GadaiUlangController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
+        // --- VALIDASI LIMIT 3 BARANG BERJALAN (KHUSUS HANDPHONE) ---
+        $nasabahId = $request->input('nasabah.id');
+        $typeIdInput = $request->input('detail.type_id');
+
+        $typeMaster = Type::find($typeIdInput);
+        $typeNama = strtolower($typeMaster->nama_type ?? '');
+        $isHP = in_array($typeNama, ['handphone', 'hp', 'elektronik']);
+
+        if ($isHP) {
+            // Cek barang yang statusnya BELUM LUNAS (artinya: proses, approved, atau selesai)
+            $jumlahGadaiBerjalan = DetailGadai::where('nasabah_id', $nasabahId)
+                ->where('type_id', $typeIdInput)
+                ->where('status', '!=', 'lunas') 
+                ->count();
+
+            if ($jumlahGadaiBerjalan >= 3) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Limit tercapai! Nasabah sudah memiliki {$jumlahGadaiBerjalan} unit Handphone yang masih berjalan/belum lunas. Salah satu harus dilunasi terlebih dahulu."
+                ], 422);
+            }
+        }
+
         DB::beginTransaction();
 
         try {
-            $nasabahId    = $request->input('nasabah.id');
             $detailInput  = $request->input('detail', []);
             $barangInput  = $request->input('barang', []);
 
@@ -78,13 +100,13 @@ class GadaiUlangController extends Controller
             $tanggal = date_create($detailInput['tanggal_gadai']);
             [$day, $month, $year] = [$tanggal->format('d'), $tanggal->format('m'), $tanggal->format('Y')];
 
+            // Penomoran Otomatis
             $lastDetail = DetailGadai::lockForUpdate()->orderBy('id', 'desc')->first();
             $noNum      = $lastDetail ? (int) substr($lastDetail->no_nasabah, -4) + 1 : 1;
             $noNasabah  = $month . substr($year, 2) . str_pad($noNum, 4, '0', STR_PAD_LEFT);
-
-            $typeMaster = Type::find($detailInput['type_id']);
             $noGadai = "SGI-$day-$month-$year-" . ($typeMaster->nomor_type ?? '00') . "-" . str_pad($noNum, 4, '0', STR_PAD_LEFT);
 
+            // 1. Simpan Detail Gadai
             $detail = DetailGadai::create([
                 'no_gadai'      => $noGadai,
                 'no_nasabah'    => $noNasabah,
@@ -99,6 +121,7 @@ class GadaiUlangController extends Controller
 
             $pureGradeType = strtolower(str_replace(['-', ' '], '_', $barangInput['grade_type']));
 
+            // 2. Simpan Data Barang (HP)
             $barang = GadaiHp::create([
                 'detail_gadai_id' => $detail->id,
                 'nama_barang'     => $barangInput['nama_barang'] ?? 'Smartphone',
@@ -116,6 +139,7 @@ class GadaiUlangController extends Controller
                 'kunci_pola'      => $barangInput['kunci_pola'] ?? null,
             ]);
 
+            // Sync Kerusakan & Kelengkapan
             if (!empty($barangInput['kerusakan'])) {
                 $barang->kerusakanList()->sync($barangInput['kerusakan']);
             }
@@ -123,6 +147,7 @@ class GadaiUlangController extends Controller
                 $barang->kelengkapanList()->sync($barangInput['kelengkapan']);
             }
 
+            // 3. Hitung Nominal Berdasarkan Grade & Kerusakan
             $hargaMaster = HargaHp::where('type_hp_id', $barang->type_hp_id)->first();
             if (!$hargaMaster) throw new \Exception("Harga Master untuk tipe ini belum diatur.");
 
@@ -133,41 +158,43 @@ class GadaiUlangController extends Controller
 
             $colPinjaman = 'grade_' . $pureGradeType;
             $colTaksiran = 'taksiran_' . $pureGradeType;
+            
             $basePinjaman = (float) ($gradeData->{$colPinjaman} ?? 0);
             $baseTaksiran = (float) ($gradeData->{$colTaksiran} ?? 0);
+
+            // Hitung Pengurang Kerusakan
             $totalPersenKerusakan = DB::table('gadai_hp_kerusakan')
                 ->where('gadai_hp_id', $barang->id)
                 ->join('kerusakan', 'kerusakan.id', '=', 'gadai_hp_kerusakan.kerusakan_id')
                 ->sum('kerusakan.persen') ?: 0;
+
             $multiplier = max(0, min(1, (100 - (float)$totalPersenKerusakan) / 100));
-            $rawPinjaman = $basePinjaman * $multiplier;
-            $rawTaksiran = $baseTaksiran * $multiplier;
-            $finalUangPinjaman = floor($rawPinjaman / 1000) * 1000;
-            $finalTaksiran     = floor($rawTaksiran / 1000) * 1000;
+            
+            $finalUangPinjaman = floor(($basePinjaman * $multiplier) / 1000) * 1000;
+            $finalTaksiran     = floor(($baseTaksiran * $multiplier) / 1000) * 1000;
+
             $detail->update([
                 'taksiran'      => $finalTaksiran,
                 'uang_pinjaman' => $finalUangPinjaman,
             ]);
             $barang->update(['grade_nominal' => $finalUangPinjaman]);
 
+            // 4. Upload Dokumen SOP
             $this->uploadDokumenSop($request, $barang, $nasabah, $detail);
 
-                try {
+            // 5. Kirim Notifikasi
+            try {
                 $notificationService = app(\App\Services\NotificationService::class);
-                
                 $totalGadaiNasabah = DetailGadai::where('nasabah_id', $nasabah->id)->count();
 
                 if ($totalGadaiNasabah > 1) {
                     $notificationService->notifyRepeatOrder($detail, $totalGadaiNasabah);
                 } else {
-                    // Jaga-jaga jika data nasabah baru tapi masuk lewat wizard ini
                     $notificationService->notifyNewTransaction($detail);
                 }
             } catch (\Exception $e) {
                 \Log::error('Notifikasi Gadai Ulang Gagal: ' . $e->getMessage());
-                // Jangan throw error agar transaksi database tetap aman
             }
-
 
             DB::commit();
 

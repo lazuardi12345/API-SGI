@@ -318,4 +318,47 @@ class NotificationServiceController extends Controller
             ];
         }
     }
+
+
+    public function getBadgeCounters()
+{
+    $user = auth()->user();
+
+    // 1. NEW_PAWN: Status 'proses' (Transaksi baru yang butuh tindakan)
+    $newPawnCount = \App\Models\DetailGadai::where('status', 'proses')
+        ->whereIn('approval_status', ['draft', 'pending'])
+        ->count();
+
+    // 2. REPEAT_ORDER: Gadai ulang
+    $repeatOrderCount = \App\Models\DetailGadai::where('is_repeat', true)
+        ->whereDate('created_at', today())
+        ->count();
+
+    // 3. APPROVAL_HM: Khusus untuk manajer/HM
+    $approvalHmCount = \App\Models\DetailGadai::where('approval_status', 'pending')->count();
+
+    // 4. AUCTION_NOTIF: Barang lelang (Sesuai fungsi notifyBarangLelang)
+    $auctionCount = \App\Models\DetailGadai::where('status', 'lelang')->count();
+
+    // Ambil unread dari NestJS untuk 'Pemberitahuan'
+    $notifListCount = 0; 
+    try {
+        $nestRes = $this->getUserNotifications($user->id, 1);
+        $notifListCount = $nestRes['data']['totalUnread'] ?? 0;
+    } catch (\Exception $e) {
+        Log::error("Gagal ambil unread dari Nest: " . $e->getMessage());
+    }
+
+    return response()->json([
+        'success' => true,
+        'data' => [
+            'NEW_PAWN'        => $newPawnCount,
+            'REPEAT_ORDER'    => $repeatOrderCount,
+            'APPROVAL_HM'     => $approvalHmCount,
+            'NOTIF_LIST'      => $notifListCount,
+            'AUCTION_NOTIF'   => $auctionCount,
+            'LAPORAN_TERBARU' => 0, // Isi sesuai logika laporan lo
+        ]
+    ]);
+}
 }

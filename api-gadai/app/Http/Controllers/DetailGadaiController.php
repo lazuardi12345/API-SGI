@@ -129,6 +129,7 @@ private function calculateLateDays($item)
             'type_id'       => $request->type_id,
             'nasabah_id'    => $request->nasabah_id,
             'status'        => $request->status ?? 'proses',
+            'is_repeat'     => $isRepeat,
         ]);
 
         return response()->json(['success' => true, 'data' => $gadai], 201);
@@ -146,19 +147,55 @@ private function calculateLateDays($item)
         ], 400);
     }
 
-    $gadai->update(['status' => 'selesai']);
-
+    DB::beginTransaction();
     try {
-        $notifService = new \App\Services\NotificationService();
-        $notifService->notifyUnitSelesai($gadai);
-    } catch (\Exception $e) {
-        \Log::error("Gagal kirim notif validasi: " . $e->getMessage());
-    }
+        // 1. Update status gadai menjadi selesai
+        $gadai->update(['status' => 'selesai']);
 
-    return response()->json([
-        'success' => true, 
-        'message' => 'Unit divalidasi SELESAI. Notifikasi telah dikirim ke petugas.'
-    ]);
+        // 2. Auto-create approval checker dengan status approved
+        $user = Auth::user();
+        
+        // Cek apakah sudah ada approval dari checker ini
+        $existingApproval = \App\Models\Approval::where('detail_gadai_id', $id)
+            ->where('role', 'checker')
+            ->first();
+
+        if (!$existingApproval) {
+            \App\Models\Approval::create([
+                'detail_gadai_id' => $id,
+                'user_id' => $user->id,
+                'role' => 'checker',
+                'status' => 'approved_checker',
+                'catatan' => 'Auto-approved saat validasi selesai pengecekan fisik unit',
+            ]);
+
+            // Update status checker di detail_gadai
+            $gadai->update(['status_checker' => 'approved_checker']);
+        }
+
+        DB::commit();
+
+        // 3. Kirim notifikasi
+        try {
+            $notifService = new \App\Services\NotificationService();
+            $notifService->notifyUnitSelesai($gadai);
+        } catch (\Exception $e) {
+            \Log::error("Gagal kirim notif validasi: " . $e->getMessage());
+        }
+
+        return response()->json([
+            'success' => true, 
+            'message' => 'Unit divalidasi SELESAI dan otomatis di-approve oleh Checker. Notifikasi telah dikirim ke petugas.'
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        \Log::error('Error validasi selesai: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal memvalidasi: ' . $e->getMessage()
+        ], 500);
+    }
 }
 
 public function pelunasan(Request $request, $id)
@@ -193,7 +230,7 @@ public function pelunasan(Request $request, $id)
     ]);
 
     if ($validator->fails()) {
-        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        return response()->json(['success' => false, 'errors' => $validator->errors(), 'perhitungan' => $perhitungan], 422);
     }
 
     DB::beginTransaction();
@@ -266,6 +303,7 @@ public function show($id)
     $hariKeterlambatan = $this->calculateLateDays($gadai);
     $pelunasanService = new \App\Services\PelunasanService();
     
+    // Perhitungan Pelunasan
     if ($gadai->status === 'lunas') {
         $perhitungan = [
             'pokok'          => (float)$gadai->uang_pinjaman,
@@ -290,7 +328,26 @@ public function show($id)
         $qrCodeBase64 = 'data:image/png;base64,' . base64_encode($qrCodeRaw);
         $qrGudangRaw = QrCode::format('png')->size(200)->margin(1)->generate($gadai->no_gadai); 
         $qrGudangBase64 = 'data:image/png;base64,' . base64_encode($qrGudangRaw);
+    }
 
+    $nominal = (float) $gadai->uang_pinjaman;
+    $namaType = strtolower($gadai->type->nama_type ?? '');
+    $isTtdBasah = false;
+
+    // Sesuai aturan: HP <= 2jt atau Emas/Mulia <= 4jt
+    if (str_contains($namaType, 'hp') || str_contains($namaType, 'handphone')) {
+        if ($nominal <= 2000000) {
+            $isTtdBasah = true;
+        }
+    } else if (
+        str_contains($namaType, 'logam_mulia') || 
+        str_contains($namaType, 'retro') || 
+        str_contains($namaType, 'emas') || 
+        str_contains($namaType, 'perhiasan')
+    ) {
+        if ($nominal <= 4000000) {
+            $isTtdBasah = true;
+        }
     }
 
     $dataResponse = $gadai->toArray(); 
@@ -299,12 +356,14 @@ public function show($id)
     $dataResponse['is_overdue'] = $hariKeterlambatan > 0;
     $dataResponse['is_approved'] = $isApproved; 
 
-
+    // Metadata untuk FE
     $dataResponse['metadata'] = [
-        'qr_code'      => $qrCodeBase64,
-        'qr_gudang'    => $qrGudangBase64, 
-        'checker_name' => $isApproved ? ($gadai->approvals->where('role', 'checker')->first()->user->name ?? 'Checker SGI') : null,
-        'acc_at'       => $isApproved ? $gadai->updated_at->format('d-m-Y H:i') : null,
+        'qr_code'       => $qrCodeBase64,
+        'qr_gudang'     => $qrGudangBase64, 
+        'is_ttd_basah'  => $isTtdBasah, // Jika true, FE jangan tampilkan gambar TTD Manager
+        'signer_label'  => $isTtdBasah ? 'KEPALA TOKO SGI' : 'MANAGER SGI',
+        'checker_name'  => $isApproved ? ($gadai->approvals->where('role', 'checker')->first()->user->name ?? 'Checker SGI') : null,
+        'acc_at'        => $isApproved ? $gadai->updated_at->format('d-m-Y H:i') : null,
     ];
 
     // Dokumen pendukung logic

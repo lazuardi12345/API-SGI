@@ -35,10 +35,8 @@ use App\Http\Controllers\PetugasLaporanController;
 use App\Http\Controllers\AdminLaporanMingguanController;
 use App\Http\Controllers\PelunasanController;
 use App\Http\Controllers\LaporanGudangController;
-
 use App\Events\TransaksiBaru;
-// ================== AUTH ================== //
-
+use App\Http\Controllers\NotificationServiceController;
 
 
 Route::post('/register', [AuthController::class, 'register'])->name('auth.register');
@@ -57,7 +55,6 @@ Route::get('/files/{path}', [App\Http\Controllers\StorageController::class, 'get
 });
 
 Route::get('/test-notification', function() {
-    // Menggunakan app() agar constructor __construct() di controller berjalan sempurna
     $notifService = app(\App\Http\Controllers\NotificationServiceController::class);
     
     $result = $notifService->notifyRole(
@@ -114,6 +111,7 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('all/gudang/riwayat', [LaporanGudangController::class, 'index']);
     Route::get('all/gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
     Route::get('all/gudang/riwayat/{id}', [LaporanGudangController::class, 'show']);
+    Route::get('notifications/badge-counters', [NotificationServiceController::class, 'getBadgeCounters']);
 });
 
 
@@ -224,7 +222,7 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::post('/approvals/{detailGadaiId}/update-detail', [ApprovalController::class, 'updateApprovalDetail']);
     Route::get('/approvals/{detailGadaiId}/full-detail', [ApprovalController::class, 'getApprovalDetail']);
 
-      // dashboard
+    // dashboard
     Route::get('summary', [DashboardGadaiController::class, 'summary']);
     Route::get('pendapatan-bulanan', [DashboardGadaiController::class, 'pendapatanPerBulan']);
     Route::get('nasabah-bulanan', [DashboardGadaiController::class, 'nasabahPerBulan']);
@@ -250,7 +248,7 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::get('notifications', [NotificationController::class, 'getAll']);
     Route::post('notifications/mark-read', [NotificationController::class, 'markAsRead']);
 
-        // Gadai Ulang (Nasabah Lama)
+    // Gadai Ulang (Nasabah Lama)
     Route::post('/gadai/ulang', [GadaiUlangController::class, 'store']);
     
     // Cek Nasabah by NIK (untuk validasi sebelum gadai ulang)
