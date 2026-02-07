@@ -185,60 +185,76 @@ public function update(Request $request, $id)
     $hp = GadaiHp::with([
         'detailGadai.nasabah',
         'kelengkapanList',
-        'kerusakanList'
+        'kerusakanList',
+        'dokumenPendukungHp'
     ])->findOrFail($id);
-    $hp->update($request->only([
-        'imei','warna','kunci_password','kunci_pin','kunci_pola',
-        'ram','rom','grade_hp_id','grade_type'
-    ]));
+
+    $dataUpdate = $request->only([
+        'imei', 'warna', 'kunci_password', 'kunci_pin', 'kunci_pola',
+        'ram', 'rom', 'grade_hp_id', 'grade_type'
+    ]);
+
+    if ($request->hasFile('imei')) {
+        unset($dataUpdate['imei']);
+    }
+
+    $hp->update($dataUpdate);
     if ($request->filled('grade_hp_id') && $request->filled('grade_type')) {
         $grade = GradeHp::find($request->grade_hp_id);
         $columnName = "grade_" . $request->grade_type; 
         $newNominal = $grade->$columnName ?? 0;
-
         $hp->update(['grade_nominal' => $newNominal]);
         $hp->refresh(); 
     }
+
     if ($request->has('kelengkapan'))
         $hp->kelengkapanList()->sync($this->normalizeItems($request->kelengkapan));
 
     if ($request->has('kerusakan'))
         $hp->kerusakanList()->sync($this->normalizeItems($request->kerusakan));
     $hp->load(['kelengkapanList', 'kerusakanList']);
-    $totalKelengkapan = $hp->kelengkapanList->sum(function ($k) {
-        return $k->pivot->nominal_override ?? $k->nominal ?? 0;
-    });
-
-    $totalKerusakan = $hp->kerusakanList->sum(function ($k) {
-        return $k->pivot->nominal_override ?? $k->nominal ?? 0;
-    });
+    $totalKelengkapan = $hp->kelengkapanList->sum(fn($k) => $k->pivot->nominal_override ?? $k->nominal ?? 0);
+    $totalKerusakan = $hp->kerusakanList->sum(fn($k) => $k->pivot->nominal_override ?? $k->nominal ?? 0);
+    
     $taksiranAkhir = $hp->grade_nominal ?? $request->grade_nominal ?? 0;
     $uangPinjaman = ($taksiranAkhir + $totalKelengkapan) - $totalKerusakan;
     if ($uangPinjaman < 0) $uangPinjaman = 0;
+
     $detail = $hp->detailGadai;
     if ($detail) {
         $detail->taksiran = $taksiranAkhir > 0 ? $taksiranAkhir : $detail->taksiran;
         $detail->uang_pinjaman = $uangPinjaman;
         $detail->save();
     }
+
     $dokumen = $hp->dokumenPendukungHp()->firstOrCreate([]);
     $nasabah = $hp->detailGadai->nasabah;
     $nasabahName = preg_replace('/[^A-Za-z0-9_\-]/', '', str_replace(' ', '_', $nasabah->nama_lengkap ?? 'unknown'));
     $nasabahNik  = preg_replace('/[^A-Za-z0-9]/', '', $nasabah->nik ?? 'unknown');
     $noGadai = $hp->detailGadai->no_gadai ?? $hp->id;
     $folder = "{$nasabahName}/handphone/{$noGadai}";
+    if ($request->has('remove_files')) {
+        foreach ($request->remove_files as $fieldToRemove) {
+            if (in_array($fieldToRemove, $this->dokumenFields)) {
+                $this->deleteOldFiles($folder, $fieldToRemove, $nasabahNik);
+                $dokumen->$fieldToRemove = null;
+            }
+        }
+    }
 
     foreach ($this->dokumenFields as $field) {
-        if ($request->hasFile($field)) {
+        $fileKey = $request->hasFile("file_{$field}") ? "file_{$field}" : ($request->hasFile($field) ? $field : null);
+
+        if ($fileKey) {
             $this->deleteOldFiles($folder, $field, $nasabahNik);
-            $file = $request->file($field);
+
+            $file = $request->file($fileKey);
             $ext = $file->getClientOriginalExtension();
-            $fileName = "{$field}_{$nasabahNik}.{$ext}";
+            $fileName = "{$field}_{$nasabahNik}_" . time() . ".{$ext}"; 
             $dokumen->$field = $file->storeAs($folder, $fileName, 'minio');
         }
     }
     $dokumen->save();
-
     $hp->dokumen_pendukung = $this->convertDokumen($dokumen);
     unset($hp->dokumenPendukungHp);
 

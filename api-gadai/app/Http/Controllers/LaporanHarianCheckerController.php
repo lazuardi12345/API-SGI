@@ -9,6 +9,7 @@ use App\Models\DetailGadai;
 use App\Models\PerpanjanganTempo;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 
 class LaporanHarianCheckerController extends Controller
@@ -23,6 +24,88 @@ class LaporanHarianCheckerController extends Controller
             'namaManager' => $existing ? $existing->approved_by : $request->get('manager_name', null),
             'docId'       => $existing ? $existing->doc_id : null
         ];
+    }
+
+    public function cetakLaporanHarian(Request $request)
+    {
+        try {
+            $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
+            
+            // 1. Metadata Approval
+            $existing = ReportPrint::where('report_type', 'harian')->where('report_date', $tanggal)->first();
+            $isApproved = $existing ? (bool)$existing->is_approved : false;
+            $namaManager = $existing ? $existing->approved_by : null;
+            $docId = $existing ? $existing->doc_id : null;
+            $qrCode = $isApproved && $namaManager && $docId 
+                ? $this->generateReportQr("Rekapitulasi Harian", $tanggal, $docId, $namaManager) : null;
+
+            $laporanTabel = [];
+            $no = 1;
+            $grandTotalDebet = 0;  // Pemasukan
+            $grandTotalKredit = 0; // Pengeluaran
+
+            // A. GADAI BARU (KREDIT / PENGELUARAN)
+            $gadaiBaru = DB::table('detail_gadai')
+                ->join('types', 'detail_gadai.type_id', '=', 'types.id')
+                ->select('types.nama_type', DB::raw('count(*) as qty'), DB::raw('SUM(CAST(detail_gadai.uang_pinjaman AS UNSIGNED)) as total_nominal'))
+                ->whereDate('detail_gadai.tanggal_gadai', $tanggal)
+                ->whereNull('detail_gadai.deleted_at')
+                ->groupBy('types.nama_type')->get();
+
+            foreach ($gadaiBaru as $gb) {
+                $laporanTabel[] = [
+                    'no' => $no++, 'keterangan' => "Pencairan Gadai: " . $gb->nama_type,
+                    'qty' => (int)$gb->qty, 'debet' => 0, 'kredit' => (float)$gb->total_nominal,
+                ];
+                $grandTotalKredit += (float)$gb->total_nominal;
+            }
+
+            // B. PELUNASAN (DEBET / PEMASUKAN)
+            $pelunasan = DB::table('detail_gadai')
+                ->join('types', 'detail_gadai.type_id', '=', 'types.id')
+                ->select('types.nama_type', DB::raw('count(*) as qty'), DB::raw('SUM(CAST(detail_gadai.nominal_bayar AS UNSIGNED)) as total_nominal'))
+                ->where('detail_gadai.status', 'lunas')->whereDate('detail_gadai.tanggal_bayar', $tanggal)
+                ->whereNull('detail_gadai.deleted_at')->groupBy('types.nama_type')->get();
+
+            foreach ($pelunasan as $p) {
+                $laporanTabel[] = [
+                    'no' => $no++, 'keterangan' => "Pelunasan Gadai: " . $p->nama_type,
+                    'qty' => (int)$p->qty, 'debet' => (float)$p->total_nominal, 'kredit' => 0,
+                ];
+                $grandTotalDebet += (float)$p->total_nominal;
+            }
+
+            // C. ADMIN PERPANJANGAN (DEBET / PEMASUKAN)
+            $perpanjangan = DB::table('perpanjangan_tempo')
+                ->join('detail_gadai', 'perpanjangan_tempo.detail_gadai_id', '=', 'detail_gadai.id')
+                ->join('types', 'detail_gadai.type_id', '=', 'types.id')
+                ->select('types.nama_type', DB::raw('count(*) as qty'), DB::raw('SUM(CAST(perpanjangan_tempo.nominal_admin AS UNSIGNED)) as total_admin'))
+                ->whereDate('perpanjangan_tempo.tanggal_perpanjangan', $tanggal)
+                ->groupBy('types.nama_type')->get();
+
+            foreach ($perpanjangan as $pj) {
+                $laporanTabel[] = [
+                    'no' => $no++, 'keterangan' => "Admin Perpanjangan: " . $pj->nama_type,
+                    'qty' => (int)$pj->qty, 'debet' => (float)$pj->total_admin, 'kredit' => 0,
+                ];
+                $grandTotalDebet += (float)$pj->total_admin;
+            }
+
+            return response()->json([
+                'success' => true,
+                'metadata' => [
+                    'halaman' => 1, 'is_approved' => $isApproved, 'approved_by' => $namaManager,
+                    'doc_id' => $docId, 'qr_code' => $qrCode,
+                    'tanggal_laporan' => Carbon::parse($tanggal)->translatedFormat('l, d F Y'),
+                ],
+                'data_tabel' => $laporanTabel,
+                'summary' => [
+                    'total_pemasukan' => $grandTotalDebet,
+                    'total_pengeluaran' => $grandTotalKredit,
+                    'selisih_kas' => $grandTotalDebet - $grandTotalKredit
+                ]
+            ]);
+        } catch (\Exception $e) { return response()->json(['success' => false, 'message' => $e->getMessage()], 500); }
     }
 
 public function cetakLaporanSerahTerima(Request $request)
@@ -118,86 +201,117 @@ public function cetakLaporanSerahTerima(Request $request)
 
 
 public function cetakLaporanPerpanjangan(Request $request)
-    {
-        try {
-            $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
-            $existing = ReportPrint::where('report_type', 'perpanjangan')
-                ->where('report_date', $tanggal)
-                ->first();
+{
+    try {
+        // 1. Inisialisasi Tanggal
+        $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
+        
+        // 2. Ambil Metadata Report (Status Approval Manager)
+        $existing = ReportPrint::where('report_type', 'perpanjangan')
+            ->where('report_date', $tanggal)
+            ->first();
 
-            $isApproved = $existing ? (bool)$existing->is_approved : false;
-            $namaManager = $existing ? $existing->approved_by : null;
-            $docId = $existing ? $existing->doc_id : null;
-            $qrCode = null;
-            if ($isApproved && $namaManager && $docId) {
-                $qrCode = $this->generateReportQr("Perpanjangan Gadai", $tanggal, $docId, $namaManager);
-            }
-            $dataPerpanjangan = \App\Models\PerpanjanganTempo::with([
-                    'detailGadai.nasabah',
-                    'detailGadai.hp.merk',
-                    'detailGadai.hp.type_hp',
-                    'detailGadai.perhiasan',
-                    'detailGadai.logamMulia',
-                    'detailGadai.retro'
-                ])
-                ->where('status_bayar', 'lunas')
-                ->whereDate('updated_at', $tanggal) 
-                ->get();
-            $formattedPerpanjangan = $dataPerpanjangan->map(function ($p) {
-                $gadai = $p->detailGadai;
-                if (!$gadai) return null;
+        $isApproved = $existing ? (bool)$existing->is_approved : false;
+        $namaManager = $existing ? $existing->approved_by : null;
+        $docId = $existing ? $existing->doc_id : null;
+        $qrCode = null;
 
-                $namaBarang = '-';
-                $detailBarang = '-';
-                if ($gadai->hp) {
-                    $namaBarang = "HP: " . ($gadai->hp->merk->nama_merk ?? '') . " " . ($gadai->hp->type_hp->nama_type ?? '');
-                    $detailBarang = "IMEI: " . ($gadai->hp->imei ?? '-');
-                } elseif ($gadai->perhiasan) {
-                    $namaBarang = "Perhiasan: " . ($gadai->perhiasan->nama_barang ?? 'Emas');
-                    $detailBarang = "Berat: {$gadai->perhiasan->berat} gr | Kadar: {$gadai->perhiasan->kadar}%";
-                } elseif ($gadai->logamMulia) {
-                    $namaBarang = "LM: " . ($gadai->logamMulia->nama_barang ?? 'Logam Mulia');
-                    $detailBarang = "Brand: {$gadai->logamMulia->brand} | Berat: {$gadai->logamMulia->berat} gr";
-                } elseif ($gadai->retro) {
-                    $namaBarang = "Retro: " . ($gadai->retro->nama_barang ?? 'Barang');
-                    $detailBarang = "Ket: " . ($gadai->retro->keterangan ?? '-');
-                }
-
-                return [
-                    'no_gadai' => $gadai->no_gadai,
-                    'nasabah' => $gadai->nasabah->nama_lengkap ?? '-',
-                    'barang' => $namaBarang,
-                    'detail' => $detailBarang,
-                    'jt_lama' => $p->tgl_jatuh_tempo_lama ? Carbon::parse($p->tgl_jatuh_tempo_lama)->format('d/m/Y') : '-',
-                    'jt_baru' => $p->jatuh_tempo_baru ? Carbon::parse($p->jatuh_tempo_baru)->format('d/m/Y') : '-',
-                    'nominal_pembayaran' => (float)$p->nominal_admin,
-                    'metode' => strtoupper($p->metode_pembayaran ?? 'CASH')
-                ];
-            })->filter()->values();
-
-            return response()->json([
-                'success' => true,
-                'metadata' => [
-                    'halaman' => 3,
-                    'tanggal_laporan' => Carbon::parse($tanggal)->translatedFormat('l, d F Y'),
-                    'is_approved' => $isApproved,
-                    'approved_by' => $namaManager,
-                    'doc_id' => $docId,
-                    'qr_code' => $qrCode,
-                    'total_dana_masuk' => $formattedPerpanjangan->sum('nominal_pembayaran'),
-                    'jumlah_transaksi' => $formattedPerpanjangan->count()
-                ],
-                'data' => $formattedPerpanjangan
-            ]);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false, 
-                'message' => 'Gagal memuat laporan perpanjangan: ' . $e->getMessage()
-            ], 500);
+        if ($isApproved && $namaManager && $docId) {
+            $qrCode = $this->generateReportQr("Perpanjangan Gadai", $tanggal, $docId, $namaManager);
         }
-    }
 
+        // 3. Query Data Perpanjangan dengan Eager Loading
+        $dataPerpanjangan = \App\Models\PerpanjanganTempo::with([
+                'detailGadai.nasabah',
+                'detailGadai.hp.merk',
+                'detailGadai.hp.type_hp',
+                'detailGadai.perhiasan',
+                'detailGadai.logamMulia',
+                'detailGadai.retro'
+            ])
+            ->where('status_bayar', 'lunas')
+            ->whereDate('updated_at', $tanggal) 
+            ->orderBy('updated_at', 'asc')
+            ->get();
+
+        // 4. Mapping Data untuk Frontend
+        $formattedPerpanjangan = $dataPerpanjangan->map(function ($p) {
+            $gadai = $p->detailGadai;
+            if (!$gadai) return null;
+
+            // Logika Penentuan Nama & Detail Barang
+            $namaBarang = '-';
+            $detailBarang = '-';
+
+            if ($gadai->hp) {
+                $namaBarang = "HP: " . ($gadai->hp->merk->nama_merk ?? '') . " " . ($gadai->hp->type_hp->nama_type ?? '');
+                $detailBarang = "IMEI: " . ($gadai->hp->imei ?? '-');
+            } elseif ($gadai->perhiasan) {
+                $p_emas = $gadai->perhiasan;
+                $namaBarang = "Perhiasan: " . ($p_emas->nama_barang ?? 'Emas');
+                $detailBarang = "Berat: {$p_emas->berat} gr | Karat: {$p_emas->karat}%";
+            } elseif ($gadai->logamMulia) {
+                $lm = $gadai->logamMulia;
+                $namaBarang = "LM: " . ($lm->nama_barang ?? 'Logam Mulia');
+                $detailBarang = "Brand: {$lm->brand} | Berat: {$lm->berat} gr";
+            } elseif ($gadai->retro) {
+                $namaBarang = "Retro: " . ($gadai->retro->nama_barang ?? 'Barang');
+                $detailBarang = "Ket: " . ($gadai->retro->keterangan ?? '-');
+            }
+
+            // --- LOGIKA ANTI STRIP (FIXED) ---
+            // 1. Cek kolom tgl_jatuh_tempo_lama di tabel perpanjangan
+            // 2. Kalau kosong, ambil dari kolom tanggal_jatuh_tempo di tabel gadai
+            // 3. Kalau masih kosong (data lama), asumsi jatuh tempo adalah saat dia bayar perpanjangan
+            $jtLamaRaw = $p->tgl_jatuh_tempo_lama 
+                         ?? $gadai->tanggal_jatuh_tempo 
+                         ?? $p->created_at;
+
+            return [
+                'no_gadai' => $gadai->no_gadai,
+                'nasabah' => $gadai->nasabah->nama_lengkap ?? '-',
+                'barang' => $namaBarang,
+                'detail' => $detailBarang,
+                'jt_lama' => Carbon::parse($jtLamaRaw)->format('d/m/Y'),
+                'jt_baru' => $p->jatuh_tempo_baru ? Carbon::parse($p->jatuh_tempo_baru)->format('d/m/Y') : '-',
+                'nominal_pembayaran' => (float)$p->nominal_admin,
+                'metode' => strtoupper($p->metode_pembayaran ?? 'CASH')
+            ];
+        })->filter()->values();
+
+        // 5. Response JSON
+        return response()->json([
+            'success' => true,
+            'metadata' => [
+                'halaman' => 3,
+                'tanggal_laporan' => Carbon::parse($tanggal)->translatedFormat('l, d F Y'),
+                'is_approved' => $isApproved,
+                'approved_by' => $namaManager,
+                'doc_id' => $docId,
+                'qr_code' => $qrCode,
+            ],
+            'summary' => [
+                'total_dana_masuk' => (float)$formattedPerpanjangan->sum('nominal_pembayaran'),
+                'jumlah_transaksi' => $formattedPerpanjangan->count(),
+                'formatted_total' => 'Rp ' . number_format($formattedPerpanjangan->sum('nominal_pembayaran'), 0, ',', '.')
+            ],
+            'data' => $formattedPerpanjangan
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false, 
+            'message' => 'Gagal memuat laporan: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+
+private function hitungKalkulasiInternal($detail, $tanggalAcuan = null) {
+        $pokok = $detail->uang_pinjaman;
+        $bunga = $pokok * 0.01 * 1; 
+        return ['total_hutang' => (int)($pokok + $bunga + 180000)];
+    }
 
 public function cetakLaporanPelelangan(Request $request)
 {
@@ -287,122 +401,39 @@ public function cetakLaporanPelelangan(Request $request)
     }
 }
 
-
-    public function cetakLaporanBrankasHarian(Request $request)
+public function ajukanLaporanChecker(Request $request)
     {
         try {
-            $tanggal = $request->get('tanggal') ?? Carbon::today()->toDateString();
+            $tanggal = $request->report_date ?? date('Y-m-d');
             
-            $existing = ReportPrint::where('report_type', 'brankas')
-                ->where('report_date', $tanggal)
-                ->first();
+            $tipeLaporan = [
+                'harian'        => 'REP-REK', 
+                'serah_terima'  => 'REP-LNS', 
+                'perpanjangan'  => 'REP-PJG', 
+                'pelelangan'    => 'REP-LLG', 
+            ];
 
-            $isApproved = $existing ? (bool)$existing->is_approved : false;
-            $namaManager = $existing ? $existing->approved_by : null;
-            $docId = $existing ? $existing->doc_id : null;
-            $qrCode = null;
-
-            if ($isApproved && $namaManager && $docId) {
-                $qrCode = $this->generateReportQr("Laporan Mutasi Brankas", $tanggal, $docId, $namaManager);
+            DB::beginTransaction();
+            foreach ($tipeLaporan as $type => $prefix) {
+                ReportPrint::updateOrCreate(
+                    ['report_type' => $type, 'report_date' => $tanggal],
+                    [
+                        'doc_id'      => $prefix . '-' . date('Ymd') . '-' . strtoupper(Str::random(5)),
+                        'printed_by'  => auth()->user()->name,
+                        'is_approved' => false,
+                        'printed_at'  => now(),
+                        'ip_address'  => $request->ip(), 
+                    ]
+                );
             }
+            DB::commit();
 
-            $mutasi = DB::table('transaksi_brankas')
-                ->whereDate('created_at', $tanggal)
-                ->orderBy('id', 'asc')
-                ->get();
-
-
-            $totalMasuk = $mutasi->where('tipe_transaksi', 'masuk')->sum('nominal');
-            $totalKeluar = $mutasi->where('tipe_transaksi', 'keluar')->sum('nominal');
-            
-            $lastRow = $mutasi->last();
-            $saldoAkhirHariIni = $lastRow ? (float)$lastRow->saldo_akhir : 0;
-
-            $saldoAwal = DB::table('transaksi_brankas')
-                ->whereDate('created_at', '<', $tanggal)
-                ->orderBy('id', 'desc')
-                ->value('saldo_akhir') ?? 0;
-
-            return response()->json([
-                'success' => true,
-                'metadata' => [
-                    'halaman' => 5,
-                    'tanggal_laporan' => Carbon::parse($tanggal)->translatedFormat('l, d F Y'),
-                    'is_approved' => $isApproved,
-                    'approved_by' => $namaManager,
-                    'doc_id' => $docId,
-                    'qr_code' => $qrCode,
-                ],
-                'summary_brankas' => [
-                    'saldo_awal' => (float)$saldoAwal,
-                    'total_debet' => (float)$totalMasuk,
-                    'total_kredit' => (float)$totalKeluar,
-                    'saldo_akhir' => (float)$saldoAkhirHariIni,
-                    'formatted_saldo_akhir' => 'Rp ' . number_format($saldoAkhirHariIni, 0, ',', '.')
-                ],
-                'data_mutasi' => $mutasi
-            ]);
+            return response()->json(['success' => true, 'message' => 'Laporan Audit (Halaman 1-4) berhasil diajukan!']);
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     }
-
-
-    private function hitungKalkulasiInternal($detail, $tanggalAcuan = null) {
-        $pokok = $detail->uang_pinjaman;
-        $bunga = $pokok * 0.01 * 1; 
-        return ['total_hutang' => (int)($pokok + $bunga + 180000)];
-    }
-
-    private function hitungSummaryBrankas($tanggal) {
-        $saldoAwal = DB::table('transaksi_brankas')->where('created_at', '<', $tanggal)->orderBy('id', 'desc')->value('saldo_akhir') ?? 0;
-        $hariIni = DB::table('transaksi_brankas')->whereDate('created_at', $tanggal);
-        return [
-            'saldo_awal_hari_ini' => (float)$saldoAwal,
-            'total_uang_masuk' => (float)$hariIni->sum('pemasukan'),
-            'total_uang_keluar' => (float)$hariIni->sum('pengeluaran'),
-            'saldo_akhir_toko' => (float)($saldoAwal + $hariIni->sum('pemasukan') - $hariIni->sum('pengeluaran'))
-        ];
-    }
-
-    private function getMutasiBrankas($tanggal) {
-        return DB::table('transaksi_brankas')->whereDate('created_at', $tanggal)->get()->map(function($item) {
-            return ['jam' => Carbon::parse($item->created_at)->format('H:i'), 'keterangan' => $item->kategori . " - " . $item->deskripsi, 'masuk' => (float)$item->pemasukan, 'keluar' => (float)$item->pengeluaran];
-        });
-    }
-
-public function ajukanLaporanChecker(Request $request)
-{
-    try {
-        $tanggal = $request->report_date ?? date('Y-m-d');
-        $tipeLaporan = [
-            'serah_terima'  => 'REP-LNS',
-            'perpanjangan'  => 'REP-PJG',
-            'pelelangan'    => 'REP-LLG',
-            'brankas'       => 'REP-BRK'
-        ];
-
-        DB::beginTransaction();
-        foreach ($tipeLaporan as $type => $prefix) {
-            ReportPrint::updateOrCreate(
-                ['report_type' => $type, 'report_date' => $tanggal],
-                [
-                    'doc_id'      => $prefix . '-' . date('Ymd') . '-' . strtoupper(\Illuminate\Support\Str::random(5)),
-                    'printed_by'  => auth()->user()->name,
-                    'is_approved' => false,
-                    'printed_at'  => now(),
-                    'ip_address'  => $request->ip(), 
-                ]
-            );
-        }
-        DB::commit();
-
-        return response()->json(['success' => true, 'message' => 'Laporan Audit (Hal 2-5) berhasil diajukan sekaligus!']);
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-    }
-}
 
 
 private function syncToReportPrints($type, $tanggal, $isApproved, $managerName, $docId, $request)

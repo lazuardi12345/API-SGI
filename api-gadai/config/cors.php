@@ -32,10 +32,11 @@ return [
         'http://192.182.6.107:3000',
         'http://192.182.6.107:3001',
         'http://localhost:3001',
+        'http://localhost:3000',
         'http://192.182.6.69:3101',
-        'https://sky-attend-phillips-cpu.trycloudflare.com',
-        'https://recruiting-classes-periodic-respiratory.trycloudflare.com',
-        'https://algebra-cruise-routing-hansen.trycloudflare.com'
+        'https://dim-providence-offset-meyer.trycloudflare.com',
+        'https://texas-upgrading-patent-alive.trycloudflare.com',
+        'https://projects-tramadol-stuck-kid.trycloudflare.com'
 
     ],
 

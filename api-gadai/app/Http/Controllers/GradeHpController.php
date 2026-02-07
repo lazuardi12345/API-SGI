@@ -23,7 +23,7 @@ class GradeHpController extends Controller
 
         $grades = GradeHp::with('hargaHp.typeHp.merk')
             ->orderBy('id', 'DESC')
-            ->paginate($perPage);
+            ->get();
 
         return response()->json([
             'success' => true,

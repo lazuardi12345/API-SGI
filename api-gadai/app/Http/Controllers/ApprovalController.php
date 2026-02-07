@@ -4,11 +4,19 @@ namespace App\Http\Controllers;
 
 use App\Models\Approval;
 use App\Models\DetailGadai;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class ApprovalController extends Controller
 {
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
+
     public function getAll(Request $request)
     {
         $perPage = 10; 
@@ -70,106 +78,104 @@ class ApprovalController extends Controller
         ]);
     }
 
-public function updateApprovalDetail(Request $request, $detailGadaiId)
-{
-    $user = Auth::user();
-    if (!$user || $user->role !== 'hm') {
-        return response()->json(['success' => false, 'message' => 'Hanya HM yang bisa edit'], 403);
-    }
-
-    $detail = DetailGadai::findOrFail($detailGadaiId);
-    $request->validate([
-        'detail_gadai.uang_pinjaman' => 'nullable|numeric',
-        'detail_gadai.taksiran' => 'nullable|numeric',
-        'detail_gadai.tanggal_gadai' => 'nullable|date',
-        'detail_gadai.jatuh_tempo' => 'nullable|date',
-
-        'perpanjangan_tempos' => 'nullable|array',
-        'perpanjangan_tempos.*.id' => 'required|exists:perpanjangan_tempos,id',
-        'perpanjangan_tempos.*.tanggal_perpanjangan' => 'nullable|date',
-        'perpanjangan_tempos.*.jatuh_tempo_baru' => 'nullable|date',
-    ]);
-    $detailData = $request->input('detail_gadai', []);
-    if (!empty($detailData)) {
-        $updateData = array_filter($detailData, fn($v) => !is_null($v));
-
-        if (!empty($updateData)) {
-            $detail->update($updateData);
+    public function updateApprovalDetail(Request $request, $detailGadaiId)
+    {
+        $user = Auth::user();
+        if (!$user || $user->role !== 'hm') {
+            return response()->json(['success' => false, 'message' => 'Hanya HM yang bisa edit'], 403);
         }
-    }
-    $perpanjangan = $request->input('perpanjangan_tempos', []);
-    foreach ($perpanjangan as $p) {
-        $tempo = $detail->perpanjanganTempos()->find($p['id']);
-        if ($tempo) {
-            $updateTempo = array_filter([
-                'tanggal_perpanjangan' => $p['tanggal_perpanjangan'] ?? null,
-                'jatuh_tempo_baru' => $p['jatuh_tempo_baru'] ?? null,
-            ], fn($v) => !is_null($v));
 
-            if (!empty($updateTempo)) {
-                $tempo->update($updateTempo);
+        $detail = DetailGadai::findOrFail($detailGadaiId);
+        $request->validate([
+            'detail_gadai.uang_pinjaman' => 'nullable|numeric',
+            'detail_gadai.taksiran' => 'nullable|numeric',
+            'detail_gadai.tanggal_gadai' => 'nullable|date',
+            'detail_gadai.jatuh_tempo' => 'nullable|date',
+
+            'perpanjangan_tempos' => 'nullable|array',
+            'perpanjangan_tempos.*.id' => 'required|exists:perpanjangan_tempos,id',
+            'perpanjangan_tempos.*.tanggal_perpanjangan' => 'nullable|date',
+            'perpanjangan_tempos.*.jatuh_tempo_baru' => 'nullable|date',
+        ]);
+        $detailData = $request->input('detail_gadai', []);
+        if (!empty($detailData)) {
+            $updateData = array_filter($detailData, fn($v) => !is_null($v));
+
+            if (!empty($updateData)) {
+                $detail->update($updateData);
             }
         }
-    }
-    $detail->load(['perpanjanganTempos', 'nasabah', 'type', 'hp', 'perhiasan', 'logamMulia', 'retro']);
+        $perpanjangan = $request->input('perpanjangan_tempos', []);
+        foreach ($perpanjangan as $p) {
+            $tempo = $detail->perpanjanganTempos()->find($p['id']);
+            if ($tempo) {
+                $updateTempo = array_filter([
+                    'tanggal_perpanjangan' => $p['tanggal_perpanjangan'] ?? null,
+                    'jatuh_tempo_baru' => $p['jatuh_tempo_baru'] ?? null,
+                ], fn($v) => !is_null($v));
 
-    return response()->json([
-        'success' => true,
-        'message' => 'Detail Approval berhasil diperbarui',
-        'data' => $detail,
-    ]);
-}
-
-
-
-public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
-{
-    $user = Auth::user();
-    if (!$user || $user->role !== 'checker') {
-        return response()->json(['success' => false, 'message' => 'Hanya Checker yang bisa edit'], 403);
-    }
-
-    $detail = DetailGadai::findOrFail($detailGadaiId);
-    $request->validate([
-        'detail_gadai.uang_pinjaman' => 'nullable|numeric',
-        'detail_gadai.taksiran' => 'nullable|numeric',
-        'detail_gadai.tanggal_gadai' => 'nullable|date',
-        'detail_gadai.jatuh_tempo' => 'nullable|date',
-
-        'perpanjangan_tempos' => 'nullable|array',
-        'perpanjangan_tempos.*.id' => 'required|exists:perpanjangan_tempos,id',
-        'perpanjangan_tempos.*.tanggal_perpanjangan' => 'nullable|date',
-        'perpanjangan_tempos.*.jatuh_tempo_baru' => 'nullable|date',
-    ]);
-    $detailData = $request->input('detail_gadai', []);
-    if (!empty($detailData)) {
-        $updateData = array_filter($detailData, fn($v) => !is_null($v));
-        if (!empty($updateData)) {
-            $detail->update($updateData);
-        }
-    }
-    $perpanjangan = $request->input('perpanjangan_tempos', []);
-    foreach ($perpanjangan as $p) {
-        $tempo = $detail->perpanjanganTempos()->find($p['id']);
-        if ($tempo) {
-            $updateTempo = array_filter([
-                'tanggal_perpanjangan' => $p['tanggal_perpanjangan'] ?? null,
-                'jatuh_tempo_baru' => $p['jatuh_tempo_baru'] ?? null,
-            ], fn($v) => !is_null($v));
-
-            if (!empty($updateTempo)) {
-                $tempo->update($updateTempo);
+                if (!empty($updateTempo)) {
+                    $tempo->update($updateTempo);
+                }
             }
         }
-    }
-    $detail->load(['perpanjanganTempos', 'nasabah', 'type', 'hp', 'perhiasan', 'logamMulia', 'retro']);
+        $detail->load(['perpanjanganTempos', 'nasabah', 'type', 'hp', 'perhiasan', 'logamMulia', 'retro']);
 
-    return response()->json([
-        'success' => true,
-        'message' => 'Detail Approval Checker berhasil diperbarui',
-        'data' => $detail,
-    ]);
-}
+        return response()->json([
+            'success' => true,
+            'message' => 'Detail Approval berhasil diperbarui',
+            'data' => $detail,
+        ]);
+    }
+
+    public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
+    {
+        $user = Auth::user();
+        if (!$user || $user->role !== 'checker') {
+            return response()->json(['success' => false, 'message' => 'Hanya Checker yang bisa edit'], 403);
+        }
+
+        $detail = DetailGadai::findOrFail($detailGadaiId);
+        $request->validate([
+            'detail_gadai.uang_pinjaman' => 'nullable|numeric',
+            'detail_gadai.taksiran' => 'nullable|numeric',
+            'detail_gadai.tanggal_gadai' => 'nullable|date',
+            'detail_gadai.jatuh_tempo' => 'nullable|date',
+
+            'perpanjangan_tempos' => 'nullable|array',
+            'perpanjangan_tempos.*.id' => 'required|exists:perpanjangan_tempos,id',
+            'perpanjangan_tempos.*.tanggal_perpanjangan' => 'nullable|date',
+            'perpanjangan_tempos.*.jatuh_tempo_baru' => 'nullable|date',
+        ]);
+        $detailData = $request->input('detail_gadai', []);
+        if (!empty($detailData)) {
+            $updateData = array_filter($detailData, fn($v) => !is_null($v));
+            if (!empty($updateData)) {
+                $detail->update($updateData);
+            }
+        }
+        $perpanjangan = $request->input('perpanjangan_tempos', []);
+        foreach ($perpanjangan as $p) {
+            $tempo = $detail->perpanjanganTempos()->find($p['id']);
+            if ($tempo) {
+                $updateTempo = array_filter([
+                    'tanggal_perpanjangan' => $p['tanggal_perpanjangan'] ?? null,
+                    'jatuh_tempo_baru' => $p['jatuh_tempo_baru'] ?? null,
+                ], fn($v) => !is_null($v));
+
+                if (!empty($updateTempo)) {
+                    $tempo->update($updateTempo);
+                }
+            }
+        }
+        $detail->load(['perpanjanganTempos', 'nasabah', 'type', 'hp', 'perhiasan', 'logamMulia', 'retro']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Detail Approval Checker berhasil diperbarui',
+            'data' => $detail,
+        ]);
+    }
 
     public function updateStatus(Request $request, $detailGadaiId)
     {
@@ -196,6 +202,7 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
                 'message' => 'Anda sudah melakukan approve/reject untuk data ini sebagai ' . strtoupper($user->role)
             ], 400);
         }
+
         $approval = Approval::create([
             'detail_gadai_id' => $detailGadaiId,
             'user_id' => $user->id,
@@ -203,10 +210,23 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
             'status' => $request->status,
             'catatan' => $request->catatan,
         ]);
+
         if ($user->role === 'checker') {
             $detailGadai->update(['status_checker' => $request->status]);
+            
+            // Kirim notifikasi ke HM ketika checker approve/reject
+            if (in_array($request->status, ['approved_checker', 'rejected_checker'])) {
+                $this->notificationService->notifyRequestApprovalToHM($detailGadai);
+            }
         } elseif ($user->role === 'hm') {
             $detailGadai->update(['status_hm' => $request->status]);
+            
+            // Kirim notifikasi approval status dari HM
+            $this->notificationService->notifyApprovalStatus(
+                $detailGadai, 
+                $request->status, 
+                $request->catatan
+            );
         }
 
         return response()->json([
@@ -215,6 +235,7 @@ public function updateApprovalDetailChecker(Request $request, $detailGadaiId)
             'data' => $approval,
         ]);
     }
+
     public function getCheckerApproved(Request $request) { return $this->filterByRoleStatus('checker','approved_checker','Data approved oleh Checker',$request); }
     public function getCheckerRejected(Request $request) { return $this->filterByRoleStatus('checker','rejected_checker','Data rejected oleh Checker',$request); }
     public function getHmApproved(Request $request) { return $this->filterByRoleStatus('hm','approved_hm','Data approved oleh HM',$request); }

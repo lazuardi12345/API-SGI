@@ -3,235 +3,135 @@
 namespace App\Http\Controllers;
 
 use App\Models\DetailGadai;
+use App\Models\PerpanjanganTempo;
+use App\Models\Pelelangan;
+use App\Traits\KalkulatorGadaiTrait; // 1. Import Trait
+use App\Services\StrukAwalService;
+use App\Services\PerpanjanganService;
+use App\Services\PelunasanService;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class AdminApprovalController extends Controller
 {
-private function hitungKalkulasi($detail, $tanggalAcuan = null)
-{
-    $tglGadai = Carbon::parse($detail->tanggal_gadai);
-    $perpanjanganTerakhir = $detail->perpanjanganTempos->last();
-    $tglJatuhTempo = $perpanjanganTerakhir 
-        ? Carbon::parse($perpanjanganTerakhir->jatuh_tempo_baru) 
-        : Carbon::parse($detail->jatuh_tempo);
+    use KalkulatorGadaiTrait; // 2. Gunakan Trait di sini
 
-    $statusStr = strtolower($detail->status);
-    $statusSelesai = in_array($statusStr, ['lunas', 'terlelang', 'selesai']);
-    $statusProses = ($statusStr === 'proses'); 
+    public function laporanMingguan(Request $request)
+    {
+        try {
+            // Parsing Tanggal
+            $start = $request->filled('start_date') 
+                ? Carbon::parse($request->get('start_date'))->startOfDay() 
+                : Carbon::now()->startOfWeek();
+            $end = $request->filled('end_date') 
+                ? Carbon::parse($request->get('end_date'))->endOfDay() 
+                : Carbon::now()->endOfWeek();
 
-    if (!$tanggalAcuan) {
-        if ($statusSelesai) {
-            $tanggalAcuan = $detail->tanggal_bayar ? Carbon::parse($detail->tanggal_bayar) : Carbon::parse($detail->updated_at);
-        } else {
-            $tanggalAcuan = Carbon::now();
-        }
-    } else {
-        $tanggalAcuan = Carbon::parse($tanggalAcuan);
-    }
+            // 1. GADAI BARU
+            $gadaiBaru = DetailGadai::with(['nasabah', 'type'])
+                ->whereBetween('tanggal_gadai', [$start, $end])
+                ->get()
+                ->map(function ($d) {
+                    $service = new StrukAwalService();
+                    $k = $service->hitungStrukAwal($d);
+                    return [
+                        'no_gadai'       => $d->no_gadai,
+                        'nasabah'        => $d->nasabah->nama_lengkap ?? "Tanpa Nama",
+                        'pokok_pinjaman' => (float)$k['pokok'],
+                        'jasa_sewa'      => (float)$k['jasa_sewa'],
+                        'admin'          => (float)$k['administrasi'],
+                        'asuransi'       => (float)$k['asuransi'],
+                        'total_diterima' => (float)$k['total_diterima'],
+                        'type'           => 'gadai_baru'
+                    ];
+                });
 
-    if ($statusProses) {
-        return [
-            'tenor_pilihan' => "0 Hari",
-            'hari_terlambat' => 0,
-            'bunga' => 0,
-            'admin' => 0,
-            'asuransi' => 0,
-            'penalty' => 0,
-            'denda' => 0,
-            'total_hutang' => 0,
-            'jatuh_tempo' => $tglJatuhTempo->format('Y-m-d'),
-            'tanggal_yang_dipakai' => $tanggalAcuan->format('Y-m-d')
-        ];
-    }
+            // 2. PERPANJANGAN
+            $perpanjangan = PerpanjanganTempo::with('detailGadai.nasabah', 'detailGadai.type')
+                ->whereBetween('created_at', [$start, $end])
+                ->get()
+                ->map(function ($p) {
+                    if (!$p->detailGadai) return null;
+                    $service = new PerpanjanganService();
+                    $k = $service->hitungPerpanjangan($p->detailGadai, $p->created_at, $p->jatuh_tempo_baru);
+                    return [
+                        'no_gadai'    => $p->detailGadai->no_gadai,
+                        'nasabah'     => $p->detailGadai->nasabah->nama_lengkap ?? "Tanpa Nama",
+                        'jasa'        => (float)$k['jasa_perpanjangan'],
+                        'denda'       => (float)$k['denda_telat'],
+                        'admin'       => (float)$k['nominal_admin'],
+                        'penalty'     => (float)$k['penalty'],
+                        'total_bayar' => (float)$k['total_bayar'],
+                        'type'        => 'perpanjangan'
+                    ];
+                })->filter()->values();
 
-    $hariTerlambat = 0;
-    $isTerlambat = false;
+            // 3. PELUNASAN
+            $pelunasan = DetailGadai::with(['nasabah', 'type'])
+                ->where('status', 'lunas')
+                ->whereBetween('tanggal_bayar', [$start, $end])
+                ->get()
+                ->map(function ($d) {
+                    $service = new PelunasanService();
+                    $k = $service->hitungPelunasan($d);
+                    return [
+                        'no_gadai'      => $d->no_gadai,
+                        'nasabah'       => $d->nasabah->nama_lengkap ?? "Tanpa Nama",
+                        'pokok'         => (float)$k['pokok'],
+                        'denda'         => (float)$k['denda'],
+                        'penalty'       => (float)$k['penalty'],
+                        'total_dibayar' => (float)$k['total_bayar'],
+                        'type'          => 'pelunasan'
+                    ];
+                });
 
-    if ($tanggalAcuan->gt($tglJatuhTempo)) {
-        $hariTerlambatAsli = (int) $tglJatuhTempo->diffInDays($tanggalAcuan);
-        $toleransi = 1;
-        
-        if ($hariTerlambatAsli > $toleransi) {
-            $hariTerlambat = $hariTerlambatAsli - $toleransi;
-            $isTerlambat = true;
-        }
-    }
+            // 4. PELELANGAN
+            $pelelangan = Pelelangan::with(['detailGadai.nasabah', 'detailGadai.type'])
+                ->where('status_lelang', 'terlelang')
+                ->whereBetween('waktu_bayar', [$start, $end])
+                ->get()
+                ->map(function ($p) {
+                    if (!$p->detailGadai) return null;
+                    
+                    $k = $this->hitungTotalTagihanLelang($p->detailGadai, $p->waktu_bayar);
+                    
+                    return [
+                        'no_gadai'      => $p->detailGadai->no_gadai,
+                        'nasabah'       => $p->detailGadai->nasabah->nama_lengkap ?? "Tanpa Nama",
+                        'total_hutang'  => (float)$k['total_hutang'],
+                        'harga_terjual' => (float)$p->nominal_diterima,
+                        'profit_loss'   => (float)$p->keuntungan_lelang,
+                        'type'          => 'pelelangan'
+                    ];
+                })->filter()->values();
 
-    $pinjaman = (float) $detail->uang_pinjaman;
-    $jenisBarang = strtolower($detail->type->nama_type ?? '');
-    $isHP = str_contains($jenisBarang, 'hp') || str_contains($jenisBarang, 'handphone') || str_contains($jenisBarang, 'elektronik');
-    
-    $bunga = 0;
-    $denda = 0;
-    $penalty = 0;
+            // Ringkasan Akhir
+            $ringkasan = [
+                'gadai_baru'   => ['total_transaksi' => $gadaiBaru->count(), 'total_nominal' => $gadaiBaru->sum('pokok_pinjaman')],
+                'perpanjangan' => ['total_transaksi' => $perpanjangan->count(), 'total_nominal' => $perpanjangan->sum('total_bayar')],
+                'pelunasan'    => ['total_transaksi' => $pelunasan->count(), 'total_nominal' => $pelunasan->sum('total_dibayar')],
+                'pelelangan'   => ['total_transaksi' => $pelelangan->count(), 'total_nominal' => $pelelangan->sum('harga_terjual')],
+            ];
 
-    if ($isTerlambat) {
-        $totalHariPinjam = (int) $tglGadai->diffInDays($tanggalAcuan);
-        $persenJasa = 0;
+            return response()->json([
+                'success' => true,
+                'periode' => ['start' => $start->format('d/m/Y'), 'end' => $end->format('d/m/Y')],
+                'data'    => [
+                    'gadai_baru'   => $gadaiBaru,
+                    'perpanjangan' => $perpanjangan,
+                    'pelunasan'    => $pelunasan,
+                    'pelelangan'   => $pelelangan,
+                    'ringkasan'    => $ringkasan,
+                ],
+            ]);
 
-        if ($isHP) {
-            if ($totalHariPinjam <= 15) $persenJasa = 0.045;
-            elseif ($totalHariPinjam <= 30) $persenJasa = 0.095;
-            elseif ($totalHariPinjam <= 45) $persenJasa = 0.145;
-            elseif ($totalHariPinjam <= 60) $persenJasa = 0.195;
-            else {
-                $extraBlocks = ceil(($totalHariPinjam - 60) / 15);
-                $persenJasa = 0.195 + ($extraBlocks * 0.05);
-            }
-        } else {
-            if ($totalHariPinjam <= 15) $persenJasa = 0.015;
-            elseif ($totalHariPinjam <= 30) $persenJasa = 0.025;
-            elseif ($totalHariPinjam <= 45) $persenJasa = 0.04;
-            elseif ($totalHariPinjam <= 60) $persenJasa = 0.05;
-            else {
-                $extraBlocks = ceil(($totalHariPinjam - 60) / 15);
-                $persenJasa = 0.05 + ($extraBlocks * 0.01);
-            }
-        }
-        $bunga = $pinjaman * $persenJasa;
-
-        $rateDenda = $isHP ? 0.003 : 0.001;
-        $denda = $pinjaman * $rateDenda * $hariTerlambat;
-
-        if ($hariTerlambat > 15) {
-            $penalty = 180000;
-        }
-    }
-
-    $adminRaw = $pinjaman * 0.01;
-    $isEmas = str_contains($jenisBarang, 'emas') || str_contains($jenisBarang, 'logam mulia') || str_contains($jenisBarang, 'retro') || str_contains($jenisBarang, 'perhiasan');
-    $adminInfo = $isEmas ? max($adminRaw, 10000) : max($adminRaw, 5000);
-    $asuransiInfo = 10000;
-
-    $totalRaw = $pinjaman + $bunga + $denda + $penalty;
-    $totalHutang = (int) (ceil($totalRaw / 1000) * 1000);
-
-    if ($statusSelesai) {
-        $totalHutang = 0;
-    }
-
-    return [
-        'tenor_pilihan' => (int) $tglGadai->diffInDays($tanggalAcuan) . " Hari",
-        'hari_terlambat' => $hariTerlambat,
-        'bunga' => round($bunga),
-        'admin' => round($adminInfo),
-        'asuransi' => $asuransiInfo,
-        'penalty' => $penalty,
-        'denda' => round($denda),
-        'total_hutang' => $totalHutang, 
-        'jatuh_tempo' => $tglJatuhTempo->format('Y-m-d'),
-        'tanggal_yang_dipakai' => $tanggalAcuan->format('Y-m-d')
-    ];
-}
-
-public function index(Request $request)
-{
-    $statusFilter = $request->get('status', 'lunas'); 
-
-    $query = DetailGadai::with([
-        'nasabah', 
-        'type', 
-        'approvals',
-        'hp.type_hp.hargaTerbaru', 
-        'perhiasan', 
-        'logamMulia', 
-        'retro'
-    ]);
-
-    if ($statusFilter !== 'all') {
-        $query->where('status', $statusFilter);
-    }
-
-    $data = $query->orderByDesc('created_at')->get();
-
-    $result = $data->map(function ($d) {
-        $kalkulasi = $this->hitungKalkulasi($d);
-        $hargaBarangMaster = 0;
-
-        if ($d->hp && $d->hp->type_hp && $d->hp->type_hp->hargaTerbaru) {
-            $hargaBarangMaster = $d->hp->type_hp->hargaTerbaru->harga_barang;
-        } else {
-            $hargaBarangMaster = 0;
-        }
-
-        $status_checker = $d->approvals->where('role', 'checker')->sortByDesc('created_at')->first()->status ?? "-";
-        $status_hm = $d->approvals->where('role', 'hm')->sortByDesc('created_at')->first()->status ?? "-";
-        $totalHutang = (strtolower($d->status) === 'lunas') 
-            ? (float) $d->nominal_bayar 
-            : (float) ($kalkulasi['total_hutang'] ?? 0);
-
-        return [
-            'id' => $d->id,
-            'no_gadai' => $d->no_gadai,
-            'nama_nasabah' => $d->nasabah->nama_lengkap ?? "-",
-            'status' => $d->status, 
-            'type' => $d->type->nama_type ?? "-",
-            'harga_barang'   => (float) $hargaBarangMaster,  
-            'taksiran'       => (float) $d->taksiran,        
-            'pinjaman_pokok' => (float) $d->uang_pinjaman,   
-
-            'tenor_pilihan'  => $kalkulasi['tenor_pilihan'] ?? "-", 
-            'hari_terlambat' => $kalkulasi['hari_terlambat'] ?? 0,  
-            'total_hutang'   => $totalHutang,
-            'denda'          => (float) ($kalkulasi['denda'] ?? 0),
-            'acc_checker'    => $status_checker,
-            'acc_hm'         => $status_hm,
-            'jatuh_tempo'    => $d->jatuh_tempo
-        ];
-    });
-
-    return response()->json([
-        'success' => true,
-        'message' => 'Laporan Admin - Status: ' . $statusFilter,
-        'data' => $result
-    ]);
-}
-
-public function detailAdmin($detailGadaiId, Request $request)
-{
-    $detail = DetailGadai::with([
-        'nasabah', 
-        'type', 
-        'approvals.user', 
-        'perpanjanganTempos',
-        'hp.merk', 'hp.type_hp', 'hp.grade', 'hp.kerusakanList', 'hp.kelengkapanList', 'hp.dokumenPendukungHp',
-        'perhiasan.kelengkapan', 'perhiasan.dokumenPendukung',
-        'logamMulia.kelengkapanEmas', 'logamMulia.dokumenPendukung',
-        'retro.kelengkapan', 'retro.dokumenPendukung'
-    ])->findOrFail($detailGadaiId);
-
-
-    $relasiEmas = ['perhiasan', 'logamMulia', 'retro'];
-
-    foreach ($relasiEmas as $rel) {
-        if ($detail->$rel && $detail->$rel->dokumenPendukung) {
-            $dokumen = $detail->$rel->dokumenPendukung;
-            $converted = [];
-            
-            foreach ($dokumen->getAttributes() as $key => $path) {
-
-                if (!in_array($key, ['id', 'emas_type', 'emas_id', 'created_at', 'updated_at']) && $path) {
-                    $converted[$key] = url("api/files/{$path}");
-                }
-            }
-
-            $detail->$rel->setAttribute('url_dokumen', $converted);
+        } catch (\Exception $e) {
+            Log::error("Error Laporan Mingguan: " . $e->getMessage());
+            return response()->json([
+                'success' => false, 
+                'message' => "Terjadi kesalahan: " . $e->getMessage()
+            ], 500);
         }
     }
-
-    $kalkulasi = $this->hitungKalkulasi($detail);
-
-    return response()->json([
-        'success' => true,
-        'data' => [
-            'detail_gadai' => $detail,
-            'perhitungan_awal' => [
-                'tenor_hari' => $kalkulasi['tenor_pilihan'], 
-                'pinjaman' => $detail->uang_pinjaman,
-            ],
-            'perhitungan_keterlambatan' => $kalkulasi 
-        ]
-    ]);
-}
 }

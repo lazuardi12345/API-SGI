@@ -37,6 +37,9 @@ use App\Http\Controllers\PelunasanController;
 use App\Http\Controllers\LaporanGudangController;
 use App\Events\TransaksiBaru;
 use App\Http\Controllers\NotificationServiceController;
+use App\Http\Controllers\LaporanKasirController;
+
+
 
 
 Route::post('/register', [AuthController::class, 'register'])->name('auth.register');
@@ -279,6 +282,7 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::get('hm/gudang/report/export', [LaporanGudangController::class, 'exportReport']);
     Route::post('hm/gudang/verifikasi', [LaporanGudangController::class, 'storeVerifikasi']); 
     Route::get('hm/gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
+    Route::get('laporan-mingguan-detail', [AdminApprovalController::class, 'laporanMingguan']);
 
 });
 
@@ -347,12 +351,15 @@ Route::middleware(['auth:api', 'role:checker'])->group(function () {
     // Route::post('checker/brankas/transaksi', [BrankasController::class, 'store']);
     Route::get('checker/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
     Route::get('checker/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('checker/harian/cetak', [LaporanHarianCheckerController::class, 'cetakLaporanHarian']);
     Route::get('checker/harian/cetak-serah-terima', [LaporanHarianCheckerController::class, 'cetakLaporanSerahTerima']);
     Route::get('checker/cetak-perpanjangan', [LaporanHarianCheckerController::class, 'cetakLaporanPerpanjangan']);
-    Route::get('checker/cetak-brankas', [LaporanHarianCheckerController::class, 'cetakLaporanBrankasHarian']);
+
     Route::get('checker/cetak-lelang', [LaporanHarianCheckerController::class, 'cetakLaporanPelelangan']);
     Route::post('checker/report/submit', [LaporanHarianCheckerController::class, 'ajukanLaporanChecker']);
     Route::post('checker/detail-gadai/submit/{id}', [DetailGadaiController::class, 'ajukanSBG']);
+
+    Route::get('checker/cetak-brankas', [LaporanHarianCheckerController::class, 'cetakLaporanBrankasHarian']);
     
 
 });
@@ -389,6 +396,8 @@ Route::middleware(['auth:api', 'role:admin'])->group(function () {
     Route::get('admin/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
     Route::get('admin/laporan/rekap-pelunasan-mingguan', [AdminLaporanMingguanController::class, 'rekapPelunasanMingguan']);
     Route::get('admin/rekap-bulanan-lelang', [AdminLaporanMingguanController::class, 'rekapBulananPelelangan']);
+    Route::get('admin/laporan-mingguan-detail', [AdminApprovalController::class, 'laporanMingguan']);
+
 
 });
 
@@ -400,6 +409,7 @@ Route::middleware(['auth:api', 'role:gudang'])->group(function () {
     Route::get('gudang/riwayat/{id}', [LaporanGudangController::class, 'show']);
     Route::delete('gudang/riwayat/{id}', [LaporanGudangController::class, 'destroy']);
     Route::get('gudang/report/export', [LaporanGudangController::class, 'exportReport']);
+    Route::post('gudang/laporan/gudang/ajukan', [LaporanGudangController::class, 'ajukanLaporanGudang']);
 });
 
 
@@ -410,5 +420,6 @@ Route::middleware(['auth:api', 'role:kasir'])->group(function () {
     Route::post('kasir/brankas/transaksi', [BrankasController::class, 'store']);
     Route::get('kasir/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
     Route::get('kasir/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
-
+    Route::get('kasir/laporan/brankas', [LaporanKasirController::class, 'cetakLaporanBrankasHarian']);
+    Route::post('kasir/laporan/brankas/ajukan', [LaporanKasirController::class, 'ajukanLaporanBrankas']);
 });

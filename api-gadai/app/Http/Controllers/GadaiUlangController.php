@@ -2,64 +2,65 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\{DataNasabah, DetailGadai, GadaiHp, Type, HargaHp, GradeHp, DokumenPendukungHp};
+use App\Services\{GadaiDateService, NotificationService};
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use App\Models\DataNasabah;
-use App\Models\DetailGadai;
-use App\Models\GadaiHp;
-use App\Models\Type;
-use App\Models\HargaHp;
-use App\Models\GradeHp;
-use App\Models\DokumenPendukungHp;
+use Illuminate\Support\Facades\{DB, Validator, Log};
 use Carbon\Carbon;
 
 class GadaiUlangController extends Controller
 {
+    /**
+     * SOP Dokumen Pendukung berdasarkan Merk
+     */
     const DOKUMEN_SOP_HP = [
         'Android' => ['body','imei','about','akun','admin','cam_depan','cam_belakang','rusak'],
         'Samsung' => ['body','imei','about','samsung_account','admin','cam_depan','cam_belakang','galaxy_store'],
         'iPhone'  => ['body','imei','about','icloud','battery','3utools','iunlocker','cek_pencurian'],
     ];
-public function checkNasabah(Request $request)
-{
-    $nik = $request->input('nik');
-    if (!$nik) return response()->json(['success' => false, 'message' => 'NIK wajib diisi.'], 422);
 
-    $nasabah = DataNasabah::where('nik', $nik)->first();
-    if (!$nasabah) return response()->json(['success' => false, 'message' => 'Nasabah belum terdaftar.'], 404);
-    $gadaiBerjalan = DetailGadai::where('nasabah_id', $nasabah->id)
-        ->whereHas('type', function($q) {
-            $q->where('nama_type', 'like', '%hp%')
-              ->orWhere('nama_type', 'like', '%handphone%');
-        })
-        ->where('status', '!=', 'lunas')
-        ->count();
+    /**
+     * Check Riwayat & Status Nasabah sebelum Gadai Ulang
+     */
+    public function checkNasabah(Request $request)
+    {
+        $nik = $request->input('nik');
+        if (!$nik) return response()->json(['success' => false, 'message' => 'NIK wajib diisi.'], 422);
 
-    $riwayatGadai = DetailGadai::where('nasabah_id', $nasabah->id)
-        ->with(['hp'])
-        ->orderBy('created_at', 'desc')
-        ->get();
+        $nasabah = DataNasabah::where('nik', $nik)->first();
+        if (!$nasabah) return response()->json(['success' => false, 'message' => 'Nasabah belum terdaftar.'], 404);
 
-    return response()->json([
-        'success' => true,
-        'data' => [
-            'nasabah' => $nasabah,
-            'total_gadai' => $riwayatGadai->count(),
-            'gadai_berjalan' => $gadaiBerjalan,
-            'riwayat_gadai' => $riwayatGadai
-        ]
-    ]);
-}
+        $gadaiBerjalan = DetailGadai::where('nasabah_id', $nasabah->id)
+            ->where('status', '!=', 'lunas')
+            ->count();
 
+        $riwayatGadai = DetailGadai::where('nasabah_id', $nasabah->id)
+            ->with(['hp'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'nasabah' => $nasabah,
+                'total_gadai' => $riwayatGadai->count(),
+                'gadai_berjalan' => $gadaiBerjalan,
+                'riwayat_gadai' => $riwayatGadai
+            ]
+        ]);
+    }
+
+    /**
+     * Simpan Transaksi Gadai Ulang
+     */
     public function store(Request $request)
     {
+        // 1. Validasi Input (jatuh_tempo dihapus karena auto-generate)
         $validator = Validator::make($request->all(), [
             'nasabah.id'           => 'required|exists:data_nasabah,id', 
             'barang.type_hp_id'    => 'required|exists:type_hp,id',
             'barang.grade_type'    => 'required|string',
             'detail.tanggal_gadai' => 'required|date',
-            'detail.jatuh_tempo'   => 'required|date',
             'detail.type_id'       => 'required|exists:types,id',
         ]);
 
@@ -67,155 +68,146 @@ public function checkNasabah(Request $request)
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        // --- VALIDASI LIMIT 3 BARANG BERJALAN (KHUSUS HANDPHONE) ---
-        $nasabahId = $request->input('nasabah.id');
-        $typeIdInput = $request->input('detail.type_id');
-
-        $typeMaster = Type::find($typeIdInput);
-        $typeNama = strtolower($typeMaster->nama_type ?? '');
-        $isHP = in_array($typeNama, ['handphone', 'hp', 'elektronik']);
-
-        if ($isHP) {
-            // Cek barang yang statusnya BELUM LUNAS (artinya: proses, approved, atau selesai)
-            $jumlahGadaiBerjalan = DetailGadai::where('nasabah_id', $nasabahId)
-                ->where('type_id', $typeIdInput)
-                ->where('status', '!=', 'lunas') 
-                ->count();
-
-            if ($jumlahGadaiBerjalan >= 3) {
-                return response()->json([
-                    'success' => false,
-                    'message' => "Limit tercapai! Nasabah sudah memiliki {$jumlahGadaiBerjalan} unit Handphone yang masih berjalan/belum lunas. Salah satu harus dilunasi terlebih dahulu."
-                ], 422);
-            }
+        // 2. Validasi Limit 3 Unit HP
+        try {
+            $this->checkLimitNasabah($request->input('nasabah.id'), $request->input('detail.type_id'));
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
 
         DB::beginTransaction();
-
         try {
-            $detailInput  = $request->input('detail', []);
-            $barangInput  = $request->input('barang', []);
+            $nasabah     = DataNasabah::findOrFail($request->input('nasabah.id'));
+            $detailInput = $request->input('detail');
+            $barangInput = $request->input('barang');
 
-            $nasabah = DataNasabah::findOrFail($nasabahId);
-            $tanggal = date_create($detailInput['tanggal_gadai']);
-            [$day, $month, $year] = [$tanggal->format('d'), $tanggal->format('m'), $tanggal->format('Y')];
+            // 3. Generate Tanggal & Nomor (SOP 15 Hari)
+            $dateService   = new GadaiDateService();
+            $tglJatuhTempo = $dateService->hitungJatuhTempoOtomatis($detailInput['tanggal_gadai'], 15);
+            $noGadaiData   = $this->generateNoGadai($detailInput['tanggal_gadai'], $detailInput['type_id']);
 
-            // Penomoran Otomatis
-            $lastDetail = DetailGadai::lockForUpdate()->orderBy('id', 'desc')->first();
-            $noNum      = $lastDetail ? (int) substr($lastDetail->no_nasabah, -4) + 1 : 1;
-            $noNasabah  = $month . substr($year, 2) . str_pad($noNum, 4, '0', STR_PAD_LEFT);
-            $noGadai = "SGI-$day-$month-$year-" . ($typeMaster->nomor_type ?? '00') . "-" . str_pad($noNum, 4, '0', STR_PAD_LEFT);
-
-            // 1. Simpan Detail Gadai
+            // 4. Simpan Detail Gadai (Status: PROSES)
             $detail = DetailGadai::create([
-                'no_gadai'      => $noGadai,
-                'no_nasabah'    => $noNasabah,
+                'no_gadai'      => $noGadaiData['no_gadai'],
+                'no_nasabah'    => $noGadaiData['no_nasabah'],
                 'nasabah_id'    => $nasabah->id,
                 'tanggal_gadai' => $detailInput['tanggal_gadai'],
-                'jatuh_tempo'   => $detailInput['jatuh_tempo'],
+                'jatuh_tempo'   => $tglJatuhTempo, // Lock ke tgl 15 jika gadai tgl 1
                 'type_id'       => $detailInput['type_id'],
-                'taksiran'      => 0, 
-                'uang_pinjaman' => 0, 
                 'status'        => 'proses',
+                'taksiran'      => 0,
+                'uang_pinjaman' => 0,
             ]);
 
-            $pureGradeType = strtolower(str_replace(['-', ' '], '_', $barangInput['grade_type']));
+            // 5. Simpan Barang & Hitung Nominal
+            $barang = $this->processGadaiHp($barangInput, $detail->id);
+            $nilai  = $this->hitungNilaiBarang($barang);
 
-            // 2. Simpan Data Barang (HP)
-            $barang = GadaiHp::create([
-                'detail_gadai_id' => $detail->id,
-                'nama_barang'     => $barangInput['nama_barang'] ?? 'Smartphone',
-                'merk_hp_id'      => $barangInput['merk_hp_id'] ?? null,
-                'type_hp_id'      => $barangInput['type_hp_id'],
-                'grade_hp_id'     => $barangInput['grade_hp_id'] ?? null,
-                'grade_type'      => $pureGradeType,
-                'grade_nominal'   => 0,
-                'imei'            => $barangInput['imei'] ?? null,
-                'warna'           => $barangInput['warna'] ?? null,
-                'ram'             => $barangInput['ram'] ?? null,
-                'rom'             => $barangInput['rom'] ?? null,
-                'kunci_password'  => $barangInput['kunci_password'] ?? null,
-                'kunci_pin'       => $barangInput['kunci_pin'] ?? null,
-                'kunci_pola'      => $barangInput['kunci_pola'] ?? null,
-            ]);
-
-            // Sync Kerusakan & Kelengkapan
-            if (!empty($barangInput['kerusakan'])) {
-                $barang->kerusakanList()->sync($barangInput['kerusakan']);
-            }
-            if (!empty($barangInput['kelengkapan'])) {
-                $barang->kelengkapanList()->sync($barangInput['kelengkapan']);
-            }
-
-            // 3. Hitung Nominal Berdasarkan Grade & Kerusakan
-            $hargaMaster = HargaHp::where('type_hp_id', $barang->type_hp_id)->first();
-            if (!$hargaMaster) throw new \Exception("Harga Master untuk tipe ini belum diatur.");
-
-            $gradeData = GradeHp::where('harga_hp_id', $hargaMaster->id)->first();
-            if (!$gradeData) throw new \Exception("Data Grade HP tidak ditemukan.");
-
-            if (!$barang->grade_hp_id) $barang->update(['grade_hp_id' => $gradeData->id]);
-
-            $colPinjaman = 'grade_' . $pureGradeType;
-            $colTaksiran = 'taksiran_' . $pureGradeType;
-            
-            $basePinjaman = (float) ($gradeData->{$colPinjaman} ?? 0);
-            $baseTaksiran = (float) ($gradeData->{$colTaksiran} ?? 0);
-
-            // Hitung Pengurang Kerusakan
-            $totalPersenKerusakan = DB::table('gadai_hp_kerusakan')
-                ->where('gadai_hp_id', $barang->id)
-                ->join('kerusakan', 'kerusakan.id', '=', 'gadai_hp_kerusakan.kerusakan_id')
-                ->sum('kerusakan.persen') ?: 0;
-
-            $multiplier = max(0, min(1, (100 - (float)$totalPersenKerusakan) / 100));
-            
-            $finalUangPinjaman = floor(($basePinjaman * $multiplier) / 1000) * 1000;
-            $finalTaksiran     = floor(($baseTaksiran * $multiplier) / 1000) * 1000;
-
+            // 6. Update Final Nominal
             $detail->update([
-                'taksiran'      => $finalTaksiran,
-                'uang_pinjaman' => $finalUangPinjaman,
+                'taksiran'      => $nilai['taksiran'],
+                'uang_pinjaman' => $nilai['pinjaman'],
             ]);
-            $barang->update(['grade_nominal' => $finalUangPinjaman]);
+            $barang->update(['grade_nominal' => $nilai['pinjaman']]);
 
-            // 4. Upload Dokumen SOP
+            // 7. Handle Dokumen SOP
             $this->uploadDokumenSop($request, $barang, $nasabah, $detail);
-
-            // 5. Kirim Notifikasi
-            try {
-                $notificationService = app(\App\Services\NotificationService::class);
-                $totalGadaiNasabah = DetailGadai::where('nasabah_id', $nasabah->id)->count();
-
-                if ($totalGadaiNasabah > 1) {
-                    $notificationService->notifyRepeatOrder($detail, $totalGadaiNasabah);
-                } else {
-                    $notificationService->notifyNewTransaction($detail);
-                }
-            } catch (\Exception $e) {
-                \Log::error('Notifikasi Gadai Ulang Gagal: ' . $e->getMessage());
-            }
 
             DB::commit();
 
+            // Notify (Repeat Order logic inside)
+            $this->sendNotification($nasabah, $detail);
+
             return response()->json([
                 'success' => true,
-                'message' => 'Gadai Ulang HP berhasil diproses',
-                'data'    => [
-                    'no_gadai'      => $detail->no_gadai,
-                    'uang_pinjaman' => $finalUangPinjaman,
-                    'taksiran'      => $finalTaksiran,
-                    'nasabah'       => $nasabah->nama_lengkap
-                ]
+                'message' => 'Gadai Ulang HP Berhasil Diproses',
+                'data'    => $detail->load('hp')
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'success' => false, 
-                'message' => 'Gagal: ' . $e->getMessage()
-            ], 500);
+            Log::error('Gadai Ulang Error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
+    }
+
+    // --- PRIVATE HELPER METHODS ---
+
+    private function checkLimitNasabah($nasabahId, $typeId)
+    {
+        $type = Type::find($typeId);
+        $name = strtolower($type->nama_type ?? '');
+        
+        if (str_contains($name, 'hp') || str_contains($name, 'handphone')) {
+            $berjalan = DetailGadai::where('nasabah_id', $nasabahId)
+                ->where('type_id', $typeId)
+                ->where('status', '!=', 'lunas')
+                ->count();
+
+            if ($berjalan >= 3) {
+                throw new \Exception("Limit tercapai! Nasabah memiliki {$berjalan} unit HP yang belum lunas.");
+            }
+        }
+    }
+
+    private function generateNoGadai($tanggal, $typeId)
+    {
+        $tgl  = Carbon::parse($tanggal);
+        $type = Type::findOrFail($typeId);
+        
+        $last  = DetailGadai::lockForUpdate()->orderBy('id', 'desc')->first();
+        $noNum = $last ? (int) substr($last->no_nasabah, -4) + 1 : 1;
+        $suffix = str_pad($noNum, 4, '0', STR_PAD_LEFT);
+
+        return [
+            'no_nasabah' => $tgl->format('my') . $suffix,
+            'no_gadai'   => "SGI-{$tgl->format('d-m-Y')}-{$type->nomor_type}-{$suffix}"
+        ];
+    }
+
+    private function hitungNilaiBarang($barang)
+    {
+        $gradeData = GradeHp::whereHas('hargaHp', function($q) use ($barang) {
+            $q->where('type_hp_id', $barang->type_hp_id);
+        })->first() ?? throw new \Exception("Master Harga/Grade belum di-setting.");
+
+        $colPinjaman = 'grade_' . $barang->grade_type;
+        $colTaksiran = 'taksiran_' . $barang->grade_type;
+
+        $totalPersenKerusakan = DB::table('gadai_hp_kerusakan')
+            ->join('kerusakan', 'kerusakan.id', '=', 'gadai_hp_kerusakan.kerusakan_id')
+            ->where('gadai_hp_id', $barang->id)
+            ->sum('kerusakan.persen') ?: 0;
+
+        $multiplier = max(0, min(1, (100 - (float)$totalPersenKerusakan) / 100));
+
+        return [
+            'pinjaman' => floor(($gradeData->$colPinjaman * $multiplier) / 1000) * 1000,
+            'taksiran' => floor(($gradeData->$colTaksiran * $multiplier) / 1000) * 1000,
+        ];
+    }
+
+    private function processGadaiHp($input, $detailId)
+    {
+        $barang = GadaiHp::create([
+            'detail_gadai_id' => $detailId,
+            'nama_barang'     => $input['nama_barang'] ?? 'Smartphone',
+            'merk_hp_id'      => $input['merk_hp_id'] ?? null,
+            'type_hp_id'      => $input['type_hp_id'],
+            'grade_type'      => strtolower(str_replace(['-', ' '], '_', $input['grade_type'])),
+            'imei'            => $input['imei'] ?? null,
+            'warna'           => $input['warna'] ?? null,
+            'ram'             => $input['ram'] ?? null,
+            'rom'             => $input['rom'] ?? null,
+            'kunci_password'  => $input['kunci_password'] ?? null,
+            'kunci_pin'       => $input['kunci_pin'] ?? null,
+            'kunci_pola'      => $input['kunci_pola'] ?? null,
+        ]);
+
+        if (!empty($input['kerusakan'])) $barang->kerusakanList()->sync($input['kerusakan']);
+        if (!empty($input['kelengkapan'])) $barang->kelengkapanList()->sync($input['kelengkapan']);
+
+        return $barang;
     }
 
     private function uploadDokumenSop($request, $barang, $nasabah, $detail)
@@ -237,6 +229,22 @@ public function checkNasabah(Request $request)
 
         if (!empty($paths)) {
             DokumenPendukungHp::create(array_merge(['gadai_hp_id' => $barang->id], $paths));
+        }
+    }
+
+    private function sendNotification($nasabah, $detail)
+    {
+        try {
+            $notif = app(NotificationService::class);
+            $total = DetailGadai::where('nasabah_id', $nasabah->id)->count();
+            
+            if ($total > 1) {
+                $notif->notifyRepeatOrder($detail, $total);
+            } else {
+                $notif->notifyNewTransaction($detail);
+            }
+        } catch (\Exception $e) {
+            Log::error("Notif Error: " . $e->getMessage());
         }
     }
 }

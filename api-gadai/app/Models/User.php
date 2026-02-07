@@ -32,7 +32,7 @@ class User extends Authenticatable implements JWTSubject
 public function getRoleNameAttribute(): ?string 
 {
     $map = [
-        self::ROLE_HM      => 'Head Marketing',
+        self::ROLE_HM      => 'Head Manager',
         self::ROLE_ADMIN   => 'Administrator',
         self::ROLE_CHECKER => 'Kepala Toko',
         self::ROLE_PETUGAS => 'Petugas Lapangan',

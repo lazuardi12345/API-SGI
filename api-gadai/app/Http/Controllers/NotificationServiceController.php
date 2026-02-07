@@ -62,6 +62,7 @@ class NotificationServiceController extends Controller
                 'message'         => (string)($data['message'] ?? ''),
                 'body'            => (string)($data['message'] ?? ''),
                 'url'             => (string)($data['url'] ?? ''),
+                'due_date'        => now()->addMonths(4)->toIso8601String(),
                 'status_transaksi' => (string)($data['status_transaksi'] ?? ''),
                 'nominal_cair'    => isset($data['nominal_cair']) ? (int)$data['nominal_cair'] : null,
                 'nominal_masuk'   => isset($data['nominal_masuk']) ? (int)$data['nominal_masuk'] : null,
@@ -222,6 +223,13 @@ class NotificationServiceController extends Controller
                 return '/notifications/pawn-apps/new-pawn-application-status-after-repayment';
             case 'ITEM_AUCTIONED':
                 return '/notifications/pawn-apps/auction-alert';
+            case 'APPROVAL': 
+            return '/notifications/pawn-apps/approval-status';
+
+            case 'APPROVAL_TO_HM': 
+            return '/notifications/pawn-apps/approval-request-checker-to-hm';
+        case 'APPROVAL_FROM_HM': 
+            return '/notifications/pawn-apps/approval-request-hm-to-checker-and-staff';
             default:
                 return '/notifications/pawn-apps/new-pawn-application';
         }
@@ -271,9 +279,7 @@ class NotificationServiceController extends Controller
         }
     }
 
-    /**
-     * ✅ TEST ENDPOINT - Manual trigger untuk debug
-     */
+
     public function testConnection()
     {
         Log::info('🧪 Testing NestJS Connection');
@@ -323,24 +329,15 @@ class NotificationServiceController extends Controller
     public function getBadgeCounters()
 {
     $user = auth()->user();
-
-    // 1. NEW_PAWN: Status 'proses' (Transaksi baru yang butuh tindakan)
     $newPawnCount = \App\Models\DetailGadai::where('status', 'proses')
         ->whereIn('approval_status', ['draft', 'pending'])
         ->count();
-
-    // 2. REPEAT_ORDER: Gadai ulang
     $repeatOrderCount = \App\Models\DetailGadai::where('is_repeat', true)
         ->whereDate('created_at', today())
         ->count();
-
-    // 3. APPROVAL_HM: Khusus untuk manajer/HM
     $approvalHmCount = \App\Models\DetailGadai::where('approval_status', 'pending')->count();
-
-    // 4. AUCTION_NOTIF: Barang lelang (Sesuai fungsi notifyBarangLelang)
     $auctionCount = \App\Models\DetailGadai::where('status', 'lelang')->count();
 
-    // Ambil unread dari NestJS untuk 'Pemberitahuan'
     $notifListCount = 0; 
     try {
         $nestRes = $this->getUserNotifications($user->id, 1);
@@ -357,7 +354,7 @@ class NotificationServiceController extends Controller
             'APPROVAL_HM'     => $approvalHmCount,
             'NOTIF_LIST'      => $notifListCount,
             'AUCTION_NOTIF'   => $auctionCount,
-            'LAPORAN_TERBARU' => 0, // Isi sesuai logika laporan lo
+            'LAPORAN_TERBARU' => 0, 
         ]
     ]);
 }

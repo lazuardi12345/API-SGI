@@ -15,6 +15,7 @@ return new class extends Migration
         $table->id();
         $table->foreignId('detail_gadai_id')->constrained('detail_gadai')->onDelete('cascade');
         $table->foreignId('user_id')->constrained('users'); 
+        $table->foreignId('penerima_id')->constrained('users');
         $table->enum('jenis_pergerakan', ['masuk', 'keluar']);
         $table->text('keterangan')->nullable();
         $table->timestamps();

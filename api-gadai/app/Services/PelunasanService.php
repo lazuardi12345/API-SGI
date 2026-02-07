@@ -3,70 +3,42 @@
 namespace App\Services;
 
 use App\Models\DetailGadai;
+use App\Traits\KalkulatorGadaiTrait;
 use Carbon\Carbon;
 
 class PelunasanService
 {
+    use KalkulatorGadaiTrait;
+
     public function hitungPelunasan(DetailGadai $detailGadai): array
     {
         $pokok = $detailGadai->uang_pinjaman;
 
-        $perpanjanganTerbaru = $detailGadai->perpanjangan_tempos()
-            ->orderBy('created_at', 'desc')
+        $perpanjanganTerbaru = $detailGadai->perpanjanganTempos()
+            ->where('status_bayar', 'lunas')
+            ->latest()
             ->first();
         
-        $jatuhTempo = $perpanjanganTerbaru 
-            ? $perpanjanganTerbaru->jatuh_tempo_baru 
-            : $detailGadai->jatuh_tempo;
+        $jatuhTempo = $perpanjanganTerbaru ? $perpanjanganTerbaru->jatuh_tempo_baru : $detailGadai->jatuh_tempo;
 
-        $today = Carbon::now();
-        $jatuhTempoDate = Carbon::parse($jatuhTempo);
+        // Hitung via Trait
+        $kalkulasi = $this->hitungDendaDanPenalty(
+            $pokok, 
+            $jatuhTempo, 
+            Carbon::now(), 
+            $detailGadai->type->nama_type ?? ''
+        );
 
-        $selisihHari = $today->diffInDays($jatuhTempoDate, false);
-
-        $toleransi = 1;
-        if ($selisihHari >= -$toleransi) {
-            $selisihHari = 0;
-        } else {
-            $selisihHari = abs($selisihHari) - $toleransi;
-        }
-        
-        $jenisSkema = $this->tentukanJenisSkema($detailGadai);
-
-        $dendaMurni = 0;
-        $penalty = 0;
-
-        if ($selisihHari > 0) {
-            $persenDendaPerHari = $jenisSkema === 'hp' ? 0.003 : 0.001;
-            $dendaMurni = $pokok * $persenDendaPerHari * $selisihHari;
-            
-            if ($selisihHari > 15) {
-                $penalty = 180000;
-            }
-        }
-
-        $totalTanpaBulat = $pokok + $dendaMurni + $penalty;
-        $totalFinal = ceil($totalTanpaBulat / 1000) * 1000; 
-
-        $selisihPembulatan = $totalFinal - $totalTanpaBulat;
-        $dendaFinal = $dendaMurni + $selisihPembulatan;
+        $totalRaw = $pokok + $kalkulasi['nominal_denda'] + $kalkulasi['nominal_penalty'];
+        $totalFinal = ceil($totalRaw / 1000) * 1000; 
 
         return [
-            'pokok' => $pokok,
-            'denda' => $dendaFinal, 
-            'penalty' => $penalty,
-            'hari_terlambat' => $selisihHari,
-            'total_bayar' => $totalFinal,
+            'pokok' => (float)$pokok,
+            'denda' => (float)$kalkulasi['nominal_denda'], 
+            'penalty' => (float)$kalkulasi['nominal_penalty'],
+            'hari_terlambat' => $kalkulasi['hari_terlambat'],
+            'total_bayar' => (float)$totalFinal,
             'jatuh_tempo' => $jatuhTempo,
-            'jenis_skema' => $jenisSkema,
-
         ];
-    }
-
-    private function tentukanJenisSkema(DetailGadai $detailGadai): string
-    {
-        $typeNama = strtolower($detailGadai->type->nama_type ?? '');
-        $skemaHp = ['handphone', 'elektronik'];
-        return in_array($typeNama, $skemaHp) ? 'hp' : 'non-hp';
     }
 }

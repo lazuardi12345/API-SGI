@@ -137,7 +137,6 @@ class NotificationService
 
 public function notifyBarangLelang($pelelangan)
 {
-    // 1. Load data dengan aman
     $pelelangan->loadMissing(['detailGadai.nasabah']);
     $gadai = $pelelangan->detailGadai;
     
@@ -147,8 +146,6 @@ public function notifyBarangLelang($pelelangan)
     }
 
     $namaNasabah = $gadai->nasabah->nama_lengkap ?? 'Tanpa Nama';
-    
-    // 2. Proteksi hitungKalkulasi agar tidak bikin crash
     try {
         $pelelanganController = app(\App\Http\Controllers\PelelanganController::class);
         $kalkulasi = $pelelanganController->hitungKalkulasi($gadai);
@@ -165,7 +162,6 @@ public function notifyBarangLelang($pelelangan)
         'total_hutang' => $totalHutang
     ]);
 
-    // 3. Kirim ke Controller Service dengan format yang pas
     return $this->controller->sendNotification([
         'user_id'          => (int) auth()->id() ?? 0, 
         'no_gadai'         => (string) $gadai->no_gadai,
@@ -175,7 +171,7 @@ public function notifyBarangLelang($pelelangan)
         'status_transaksi' => 'lelang',
         'type'             => 'ITEM_AUCTIONED', 
         'url'              => "/lelang/detail/{$gadai->id}",
-        'total_gadai'      => (int) $totalHutang // Biar NestJS dapet angka murninya juga
+        'total_gadai'      => (int) $totalHutang 
     ]);
 }
 
@@ -200,4 +196,65 @@ public function notifyBarangLelang($pelelangan)
         Log::info('📤 [DUE_DATE_REMINDER] Notification result', ['result' => $result]);
         return $result;
     }
+
+
+
+public function notifyRequestApprovalToHM($detailGadai)
+{
+    $detailGadai->loadMissing('nasabah');
+    $namaNasabah = $detailGadai->nasabah->nama_lengkap ?? 'Tanpa Nama';
+
+    Log::info('🔔 [APPROVAL_TO_HM] Requesting Approval to HM', ['no_gadai' => $detailGadai->no_gadai]);
+
+    return $this->controller->sendNotification([
+        'type'             => 'APPROVAL_TO_HM',
+        'user_id'          => (int) auth()->id(),
+        'no_gadai'         => (string) $detailGadai->no_gadai,
+        'nama_nasabah'     => $namaNasabah,
+        'status_transaksi' => 'pending_approval',
+        'total_gadai'      => (int) $detailGadai->uang_pinjaman,
+        'title'            => 'New Approval Request Requires Action',
+        'message'          => "Permintaan Persetujuan baru dengan nomor: {$detailGadai->no_gadai}, memerlukan tindakan Manager.",
+        'url'              => "/gadai/detail/{$detailGadai->no_gadai}",
+        'directUrl'        => "/gadai/detail/{$detailGadai->no_gadai}"
+    ]);
+}
+
+public function notifyApprovalStatus($detailGadai, $status, $catatan = null)
+{
+    $detailGadai->loadMissing(['nasabah', 'approvals.user']);
+    $namaNasabah = $detailGadai->nasabah->nama_lengkap ?? 'Tanpa Nama';
+    
+    $isApproved = str_contains(strtolower($status), 'approved');
+    $title = $isApproved ? '✅ Pengajuan Disetujui HM' : '❌ Pengajuan Ditolak HM';
+    
+    // PERBAIKAN: Ambil user_id dari checker yang approve, BUKAN dari HM
+    $checkerApproval = $detailGadai->approvals()
+        ->where('role', 'checker')
+        ->orderBy('created_at', 'desc')
+        ->first();
+    
+    $targetUserId = $checkerApproval ? $checkerApproval->user_id : ($detailGadai->created_by ?? 0);
+    
+    Log::info("🔔 [APPROVAL_FROM_HM] Status Update: {$status}", [
+        'no_gadai' => $detailGadai->no_gadai,
+        'target_user_id' => $targetUserId,
+        'hm_user_id' => auth()->id()
+    ]);
+
+    return $this->controller->sendNotification([
+        'type'             => 'APPROVAL_FROM_HM',
+        'user_id'          => (int) $targetUserId, 
+        'no_gadai'         => (string) $detailGadai->no_gadai,
+        'nama_nasabah'     => $namaNasabah,
+        'status_transaksi' => $isApproved ? 'approved' : 'rejected',
+        'total_gadai'      => (int) $detailGadai->uang_pinjaman,
+        'title'            => $title,
+        'message'          => $isApproved 
+            ? "Persetujuan nomor: {$detailGadai->no_gadai} telah DISETUJUI oleh HM." 
+            : "Persetujuan nomor: {$detailGadai->no_gadai} DITOLAK oleh HM. Catatan: {$catatan}",
+        'url'              => "/gadai/detail/{$detailGadai->no_gadai}",
+        'directUrl'        => "/gadai/detail/{$detailGadai->no_gadai}"
+    ]);
+}
 }
