@@ -34,9 +34,9 @@ return [
         'http://localhost:3001',
         'http://localhost:3000',
         'http://192.182.6.69:3101',
-        'https://dim-providence-offset-meyer.trycloudflare.com',
-        'https://texas-upgrading-patent-alive.trycloudflare.com',
-        'https://projects-tramadol-stuck-kid.trycloudflare.com'
+        'https://comparative-fort-besides-filename.trycloudflare.com',
+        'https://beverage-refugees-wheat-illustrated.trycloudflare.com',
+        'https://relax-lovely-contacted-corps.trycloudflare.com'
 
     ],
 

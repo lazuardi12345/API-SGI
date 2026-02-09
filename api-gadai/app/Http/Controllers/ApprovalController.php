@@ -7,6 +7,7 @@ use App\Models\DetailGadai;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class ApprovalController extends Controller
 {
@@ -15,6 +16,32 @@ class ApprovalController extends Controller
     public function __construct(NotificationService $notificationService)
     {
         $this->notificationService = $notificationService;
+    }
+
+    /**
+     * Helper: Cek apakah gadai termasuk limit kecil (tidak perlu approval HM)
+     */
+    private function isSmallLimit($detailGadai)
+    {
+        $nominal = (float) $detailGadai->uang_pinjaman;
+        $namaType = strtolower($detailGadai->type->nama_type ?? '');
+
+        // HP: <= 2 juta
+        if (str_contains($namaType, 'hp') || str_contains($namaType, 'handphone')) {
+            return $nominal <= 2000000;
+        }
+
+        // Emas/Perhiasan/LogamMulia/Retro: <= 4 juta
+        if (
+            str_contains($namaType, 'logam_mulia') || 
+            str_contains($namaType, 'retro') || 
+            str_contains($namaType, 'emas') || 
+            str_contains($namaType, 'perhiasan')
+        ) {
+            return $nominal <= 4000000;
+        }
+
+        return false; // Default: perlu approval HM
     }
 
     public function getAll(Request $request)
@@ -28,22 +55,31 @@ class ApprovalController extends Controller
         ])->orderBy('created_at', 'desc');
 
         if ($user->role === 'hm') {
+            // HM: hanya tampilkan yang BUKAN limit kecil DAN sudah approved/rejected checker
             $query->whereHas('approvals', function ($q) {
                 $q->whereIn('status', ['approved_checker','rejected_checker']);
             });
+
+            // Filter out gadai dengan limit kecil
+            $data = $query->paginate($perPage);
+            $filtered = $data->getCollection()->filter(function ($item) {
+                return !$this->isSmallLimit($item);
+            });
+            $data->setCollection($filtered->values());
+
         } else {
+            // Checker: tampilkan semua yang status "Selesai" dan belum ada approval apapun
             $query->where('status', 'Selesai')
                   ->whereDoesntHave('approvals', function ($q) {
                       $q->whereIn('status', ['approved_checker','rejected_checker','approved_hm','rejected_hm']);
                   });
+            $data = $query->paginate($perPage);
         }
-
-        $data = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,
             'message' => $user->role === 'hm'
-                ? 'Data yang sudah diapprove/reject oleh checker.'
+                ? 'Data yang sudah diapprove/reject oleh checker (kecuali limit kecil).'
                 : 'Data selesai yang belum diapprove/reject.',
             'data' => $data->items(),
             'pagination' => [
@@ -189,7 +225,7 @@ class ApprovalController extends Controller
             return response()->json(['success' => false, 'message' => 'Tidak memiliki akses approval'], 403);
         }
 
-        $detailGadai = DetailGadai::findOrFail($detailGadaiId);
+        $detailGadai = DetailGadai::with('type')->findOrFail($detailGadaiId);
 
         $existing = Approval::where('detail_gadai_id', $detailGadaiId)
             ->where('user_id', $user->id)
@@ -203,37 +239,70 @@ class ApprovalController extends Controller
             ], 400);
         }
 
-        $approval = Approval::create([
-            'detail_gadai_id' => $detailGadaiId,
-            'user_id' => $user->id,
-            'role' => $user->role,
-            'status' => $request->status,
-            'catatan' => $request->catatan,
-        ]);
+        DB::beginTransaction();
+        try {
+            $approval = Approval::create([
+                'detail_gadai_id' => $detailGadaiId,
+                'user_id' => $user->id,
+                'role' => $user->role,
+                'status' => $request->status,
+                'catatan' => $request->catatan,
+            ]);
 
-        if ($user->role === 'checker') {
-            $detailGadai->update(['status_checker' => $request->status]);
-            
-            // Kirim notifikasi ke HM ketika checker approve/reject
-            if (in_array($request->status, ['approved_checker', 'rejected_checker'])) {
-                $this->notificationService->notifyRequestApprovalToHM($detailGadai);
+            if ($user->role === 'checker') {
+                $detailGadai->update(['status_checker' => $request->status]);
+                
+                // CEK: Jika limit kecil dan checker approve → AUTO APPROVE HM
+                if ($request->status === 'approved_checker' && $this->isSmallLimit($detailGadai)) {
+                    // Buat approval HM otomatis oleh sistem
+                    Approval::create([
+                        'detail_gadai_id' => $detailGadaiId,
+                        'user_id' => $user->id, // bisa diganti ke user ID sistem jika ada
+                        'role' => 'hm',
+                        'status' => 'approved_hm',
+                        'catatan' => 'Auto-approved oleh sistem karena limit di bawah threshold (≤2jt untuk HP, ≤4jt untuk Emas/Perhiasan)',
+                    ]);
+                    $detailGadai->update(['status_hm' => 'approved_hm']);
+                    
+                    // Kirim notif approval final langsung
+                    $this->notificationService->notifyApprovalStatus(
+                        $detailGadai, 
+                        'approved_hm', 
+                        'Auto-approved (limit kecil)'
+                    );
+                } else {
+                    // Limit besar: kirim notif ke HM seperti biasa
+                    if (in_array($request->status, ['approved_checker', 'rejected_checker'])) {
+                        $this->notificationService->notifyRequestApprovalToHM($detailGadai);
+                    }
+                }
+                
+            } elseif ($user->role === 'hm') {
+                $detailGadai->update(['status_hm' => $request->status]);
+                
+                // Kirim notifikasi approval status dari HM
+                $this->notificationService->notifyApprovalStatus(
+                    $detailGadai, 
+                    $request->status, 
+                    $request->catatan
+                );
             }
-        } elseif ($user->role === 'hm') {
-            $detailGadai->update(['status_hm' => $request->status]);
-            
-            // Kirim notifikasi approval status dari HM
-            $this->notificationService->notifyApprovalStatus(
-                $detailGadai, 
-                $request->status, 
-                $request->catatan
-            );
-        }
 
-        return response()->json([
-            'success' => true,
-            'message' => ucfirst($user->role) . ' berhasil melakukan ' . str_replace('_', ' ', $request->status),
-            'data' => $approval,
-        ]);
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => ucfirst($user->role) . ' berhasil melakukan ' . str_replace('_', ' ', $request->status),
+                'data' => $approval,
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menyimpan approval: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function getCheckerApproved(Request $request) { return $this->filterByRoleStatus('checker','approved_checker','Data approved oleh Checker',$request); }

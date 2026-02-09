@@ -477,6 +477,7 @@ public function ajukanSBG(Request $request, $id)
     $nominal = (float) $gadai->uang_pinjaman;
     $namaType = strtolower($gadai->type->nama_type ?? ''); 
     $isAutoApprove = false;
+    
     if (str_contains($namaType, 'hp') || str_contains($namaType, 'handphone')) {
         if ($nominal <= 2000000) {
             $isAutoApprove = true;

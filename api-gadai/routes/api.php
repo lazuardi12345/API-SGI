@@ -283,6 +283,8 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::post('hm/gudang/verifikasi', [LaporanGudangController::class, 'storeVerifikasi']); 
     Route::get('hm/gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
     Route::get('laporan-mingguan-detail', [AdminApprovalController::class, 'laporanMingguan']);
+    Route::get('laporan/brankas', [LaporanKasirController::class, 'cetakLaporanBrankasHarian']);
+    Route::post('laporan/brankas/ajukan', [LaporanKasirController::class, 'ajukanLaporanBrankas']);
 
 });
 
