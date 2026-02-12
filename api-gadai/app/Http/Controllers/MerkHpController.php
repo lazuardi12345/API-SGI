@@ -8,14 +8,25 @@ use Illuminate\Http\Request;
 class MerkHpController extends Controller
 {
     public function index(Request $request)
-    {
-        $perPage = $request->get('per_page', 10);
+{
+    $perPage = $request->get('per_page', 10);
+    $search = $request->get('search');
 
-      return response()->json([
-    'success' => true,
-    'data' => MerkHp::orderBy('id', 'desc')->get()
-]);
+    $query = MerkHp::orderBy('id', 'desc');
+    if ($search) {
+        $query->where('nama_merk', 'like', "%{$search}%");
     }
+
+    $paginatedData = $query->paginate($perPage);
+
+    return response()->json([
+        'success'  => true,
+        'data'     => $paginatedData->items(), 
+        'page'     => $paginatedData->currentPage(),
+        'pageSize' => $paginatedData->perPage(),
+        'total'    => $paginatedData->total(),
+    ]);
+}
 
     public function store(Request $request)
     {

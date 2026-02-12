@@ -132,60 +132,64 @@ class HargaHpController extends Controller
         return response()->json(['success' => true, 'data' => $harga]);
     }
 
-    public function getByMerk($merkId)
-    {
-        $data = TypeHp::where('merk_hp_id', $merkId)
-            ->select('type_hps.*', 'harga_hps.harga_barang', 'harga_hps.harga_pasar', 'harga_hps.id as id_harga', 'harga_hps.updated_at as updated_at_harga')
-            ->leftJoin('harga_hps', 'type_hps.id', '=', 'harga_hps.type_hp_id')
-            ->orderBy('harga_hps.updated_at', 'desc') 
-            ->get();
+ public function getByMerk(Request $request, $merkId)
+{
+    $perPage = $request->get('per_page', 10); 
 
-        return response()->json(['success' => true, 'data' => $data]);
-    }
+    $data = TypeHp::where('merk_hp_id', $merkId)
+        ->select(
+            'type_hps.*', 
+            'harga_hps.harga_barang', 
+            'harga_hps.harga_pasar', 
+            'harga_hps.id as id_harga', 
+            'harga_hps.updated_at as updated_at_harga'
+        )
+        ->leftJoin('harga_hps', 'type_hps.id', '=', 'harga_hps.type_hp_id')
+        ->orderBy('harga_hps.updated_at', 'desc') 
+        ->paginate($perPage); 
 
-    public function getGradeByType($typeHpId)
-    {
-        $harga = HargaHp::with(['typeHp.merk', 'grades'])
-            ->where('type_hp_id', $typeHpId)
-            ->first();
+    return response()->json(['success' => true, 'data' => $data]);
+}
 
-        if (!$harga || !$harga->grades) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Grade belum dibuat untuk type ini',
-                'data' => null
-            ]);
-        }
+   public function getGradeByType(Request $request, $typeHpId)
+{
+    $perPage = $request->get('per_page', 10);
+    $grades = Grade::whereHas('hargaHp', function($q) use ($typeHpId) {
+            $q->where('type_hp_id', $typeHpId);
+        })
+        ->paginate($perPage);
 
+    if ($grades->isEmpty()) {
         return response()->json([
-            'success' => true,
-            'data' => $harga->grades
+            'success' => false,
+            'message' => 'Grade belum dibuat atau kosong untuk type ini',
+            'data' => null
         ]);
     }
 
-    public function getByType($type_hp_id)
-    {
-        try {
-            $harga = HargaHp::with('grades')
-                ->where('type_hp_id', $type_hp_id)
-                ->first();
+    return response()->json([
+        'success' => true,
+        'data' => $grades
+    ]);
+}
+    public function getByType(Request $request, $type_hp_id)
+{
+    try {
+        $perPage = $request->get('per_page', 10);
 
-            if (!$harga) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Harga untuk tipe HP ini belum diatur.'
-                ], 404);
-            }
+        $harga = HargaHp::with('grades')
+            ->where('type_hp_id', $type_hp_id)
+            ->paginate($perPage); 
 
-            return response()->json([
-                'success' => true,
-                'data' => $harga
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'success' => true,
+            'data' => $harga
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 500);
     }
+}
 }

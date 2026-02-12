@@ -63,36 +63,47 @@ class GadaiHpController extends Controller
             ]);
         }
     }
+public function index(Request $request)
+{
+    $perPage = $request->get('per_page', 10);
+    $search = $request->get('search');
 
-    public function index(Request $request)
-    {
-        $perPage = $request->get('per_page', 10);
-
-        $data = GadaiHp::with([
-            'detailGadai.nasabah',
-            'merk',
-            'type_hp',
-            'grade',
-            'kerusakanList',
-            'kelengkapanList',
-            'dokumenPendukungHp'
-        ])->orderByDesc('created_at')->paginate($perPage);
-
-        $items = $data->getCollection()->map(function ($hp) {
-            $hp->dokumen_pendukung = $this->convertDokumen($hp->dokumenPendukungHp);
-            unset($hp->dokumenPendukungHp); 
-            return $hp;
+    // 1. Inisialisasi Query
+    $query = GadaiHp::with([
+        'detailGadai.nasabah',
+        'merk',
+        'type_hp',
+        'grade',
+        'kerusakanList',
+        'kelengkapanList',
+        'dokumenPendukungHp'
+    ])->orderByDesc('created_at');
+    if ($search) {
+        $query->where(function($q) use ($search) {
+            $q->where('imei', 'like', "%{$search}%")
+              ->orWhereHas('detailGadai.nasabah', function($n) use ($search) {
+                  $n->where('nama_lengkap', 'like', "%{$search}%");
+              });
         });
-
-        $data->setCollection($items);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Data diambil',
-            'data'    => $items,
-            'total'   => $data->total(),
-        ]);
     }
+
+    $paginatedData = $query->paginate($perPage);
+
+    $items = collect($paginatedData->items())->map(function ($hp) {
+        $hp->dokumen_pendukung = $this->convertDokumen($hp->dokumenPendukungHp);
+        unset($hp->dokumenPendukungHp); 
+        return $hp;
+    });
+
+    return response()->json([
+        'success'  => true,
+        'message'  => 'Data diambil',
+        'data'     => $items,
+        'page'     => $paginatedData->currentPage(),
+        'pageSize' => $paginatedData->perPage(),
+        'total'    => $paginatedData->total(),
+    ]);
+}
 
     public function show($id)
     {

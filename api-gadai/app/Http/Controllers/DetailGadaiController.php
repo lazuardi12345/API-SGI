@@ -138,9 +138,10 @@ private function calculateLateDays($item)
     }
 
 
-    public function validasiSelesai(Request $request, $id)
+public function validasiSelesai(Request $request, $id)
 {
-    $gadai = DetailGadai::with(['nasabah', 'user'])->find($id);
+    // Load relasi type agar Service Kalkulasi bisa jalan
+    $gadai = DetailGadai::with(['nasabah', 'user', 'type'])->find($id);
 
     if (!$gadai || $gadai->status !== 'proses') {
         return response()->json([
@@ -151,12 +152,22 @@ private function calculateLateDays($item)
 
     DB::beginTransaction();
     try {
+        // --- 1. UPDATE STATUS MASTER ---
         $gadai->update(['status' => 'selesai']);
+
+        // --- 2. RECORD LOG KEUANGAN (GADAI AWAL) ---
+        // Kita kunci rincian biaya di sini agar permanen (Snapshot)
+        $strukService = new \App\Services\StrukAwalService();
+        $hitung = $strukService->hitungStrukAwal($gadai);
+
+        $transService = new \App\Services\GadaiTransactionService();
+        $transService->recordGadaiAwal($gadai, $hitung);
+
+        // --- 3. LOGIC APPROVAL CHECKER ---
         $user = Auth::user();
         $existingApproval = \App\Models\Approval::where('detail_gadai_id', $id)
             ->where('role', 'checker')
             ->first();
-
             
         if (!$existingApproval) {
             \App\Models\Approval::create([
@@ -170,6 +181,8 @@ private function calculateLateDays($item)
         }
 
         DB::commit();
+
+        // --- 4. KIRIM NOTIFIKASI ---
         try {
             $notifService = new \App\Services\NotificationService();
             $notifService->notifyUnitSelesai($gadai);
@@ -179,7 +192,7 @@ private function calculateLateDays($item)
 
         return response()->json([
             'success' => true, 
-            'message' => 'Unit divalidasi SELESAI dan otomatis di-approve oleh Checker. Notifikasi telah dikirim ke petugas.'
+            'message' => 'Unit divalidasi SELESAI, Rincian Struk Awal dikunci, dan otomatis di-approve oleh Checker.'
         ]);
 
     } catch (\Exception $e) {
@@ -194,12 +207,14 @@ private function calculateLateDays($item)
 
 public function pelunasan(Request $request, $id)
 {
+    // 1. Ambil data dengan relasi lengkap
     $gadai = DetailGadai::with(['nasabah', 'type', 'perpanjangan_tempos'])->find($id);
 
     if (!$gadai) {
         return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
     }
 
+    // Guard: Harus SELESAI (Validasi fisik unit) sebelum bisa pelunasan
     if ($gadai->status === 'proses') {
         return response()->json([
             'success' => false,
@@ -211,10 +226,12 @@ public function pelunasan(Request $request, $id)
         return response()->json(['success' => false, 'message' => 'Gadai sudah lunas sebelumnya'], 400);
     }
 
+    // 2. Hitung Pelunasan (Pokok + Denda - Longgar 1 Hari)
     $pelunasanService = new \App\Services\PelunasanService();
     $perhitungan = $pelunasanService->hitungPelunasan($gadai);
     $totalHarusDibayar = (float) $perhitungan['total_bayar'];
 
+    // 3. Validasi Input Pembayaran
     $validator = Validator::make($request->all(), [
         'nominal_bayar'     => 'required|numeric|min:' . $totalHarusDibayar,
         'metode_pembayaran' => 'required|in:cash,transfer',
@@ -224,18 +241,17 @@ public function pelunasan(Request $request, $id)
     ]);
 
     if ($validator->fails()) {
-        return response()->json(['success' => false, 'errors' => $validator->errors(), 'perhitungan' => $perhitungan], 422);
+        return response()->json([
+            'success' => false, 
+            'errors' => $validator->errors(), 
+            'perhitungan' => $perhitungan
+        ], 422);
     }
 
     DB::beginTransaction();
     try {
-        $updateData = [
-            'status'            => 'lunas',
-            'nominal_bayar'     => $totalHarusDibayar, 
-            'metode_pembayaran' => $request->metode_pembayaran,
-            'tanggal_bayar'     => now(),
-        ];
-
+        $pathBukti = null;
+        // 4. Handle Upload Bukti Transfer ke Minio
         if ($request->metode_pembayaran === 'transfer' && $request->hasFile('bukti_transfer')) {
             $nasabah = $gadai->nasabah;
             $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap ?? 'unknown');
@@ -244,14 +260,25 @@ public function pelunasan(Request $request, $id)
             
             $file = $request->file('bukti_transfer');
             $filename = "bukti-lunas-" . time() . "." . $file->getClientOriginalExtension();
-            $path = $file->storeAs($folderBase, $filename, 'minio');
-            $updateData['bukti_transfer'] = $path;
+            $pathBukti = $file->storeAs($folderBase, $filename, 'minio');
         }
 
-        $gadai->update($updateData);
+        // 5. Update Status Master Gadai
+        $gadai->update([
+            'status'            => 'lunas',
+            'nominal_bayar'     => $totalHarusDibayar, 
+            'metode_pembayaran' => $request->metode_pembayaran,
+            'tanggal_bayar'     => now(),
+            'bukti_transfer'    => $pathBukti,
+        ]);
+
+        // 6. Record ke Tabel Pelunasan Log (Snapshot Angka Denda & Pokok)
+        $transService = new \App\Services\GadaiTransactionService();
+        $transService->recordPelunasan($gadai, $perhitungan, $request, $pathBukti);
 
         DB::commit();
 
+        // 7. Kirim Notifikasi (Async friendly)
         try {
             $notifService = new \App\Services\NotificationService();
             $notifService->notifyPelunasan($gadai);
@@ -260,6 +287,7 @@ public function pelunasan(Request $request, $id)
         }
 
         $kembalian = (float)$request->nominal_bayar - $totalHarusDibayar;
+        
         return response()->json([
             'success'   => true,
             'message'   => 'Pelunasan LUNAS berhasil diselesaikan.',
@@ -267,7 +295,7 @@ public function pelunasan(Request $request, $id)
                 'perhitungan'     => $perhitungan,  
                 'nominal_dibayar' => (float)$request->nominal_bayar,
                 'kembalian'       => $kembalian > 0 ? $kembalian : 0,
-                'detail_gadai'    => $gadai->fresh(['nasabah', 'type'])->toArray(),
+                'no_gadai'        => $gadai->no_gadai
             ]
         ]);
 

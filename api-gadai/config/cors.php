@@ -34,9 +34,10 @@ return [
         'http://localhost:3001',
         'http://localhost:3000',
         'http://192.182.6.69:3101',
-        'https://comparative-fort-besides-filename.trycloudflare.com',
-        'https://beverage-refugees-wheat-illustrated.trycloudflare.com',
-        'https://relax-lovely-contacted-corps.trycloudflare.com'
+        'https://donations-start-matrix-jet.trycloudflare.com',
+        'https://conclusion-kentucky-massage-dod.trycloudflare.com',
+        'https://alberta-batman-superior-exemption.trycloudflare.com',
+        'http://192.182.6.100:3000'
 
     ],
 

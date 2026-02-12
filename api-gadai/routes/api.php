@@ -38,6 +38,7 @@ use App\Http\Controllers\LaporanGudangController;
 use App\Events\TransaksiBaru;
 use App\Http\Controllers\NotificationServiceController;
 use App\Http\Controllers\LaporanKasirController;
+use App\Http\Controllers\UserController;
 
 
 
@@ -77,6 +78,8 @@ Route::get('/test-notification', function() {
     ]);
 });
 
+    Route::get('/users/by-roles', [UserController::class, 'getUsersByRoles']);
+
 
 
 Route::get('/test-nestjs-connection', function() {
@@ -115,6 +118,10 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('all/gudang/pending', [LaporanGudangController::class, 'getPendingItems']);
     Route::get('all/gudang/riwayat/{id}', [LaporanGudangController::class, 'show']);
     Route::get('notifications/badge-counters', [NotificationServiceController::class, 'getBadgeCounters']);
+    Route::get('/notifications/history', [NotificationServiceController::class, 'getMyNotifications']);
+    Route::patch('/notifications/{id}/read', [NotificationServiceController::class, 'markNotificationAsRead']);
+    Route::patch('/notifications/read-all', [NotificationServiceController::class, 'markAllAsRead']);
+
 });
 
 

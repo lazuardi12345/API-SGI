@@ -7,7 +7,8 @@ use Carbon\Carbon;
 class GadaiDateService
 {
     /**
-     * SOP: Hari ke-1 dihitung. Jadi tgl 1 + 14 hari = tgl 15.
+     * Menghitung Jatuh Tempo Otomatis
+     * Tgl 12 + (15 - 1) = Tgl 26.
      */
     public function hitungJatuhTempoOtomatis($tanggalGadai, $pilihanTenor = 15)
     {
@@ -16,34 +17,40 @@ class GadaiDateService
     }
 
     /**
-     * Mendeteksi paket tenor 15 atau 30 hari berdasarkan rentang tanggal.
+     * INI YANG TADI KURANG: Hitung Selisih Hari Murni (H+1)
+     * Contoh: 12 Feb ke 26 Feb = 15 Hari.
+     */
+    public function hitungTenorMurni($tanggalGadai, $jatuhTempo)
+    {
+        $start = Carbon::parse($tanggalGadai)->startOfDay();
+        $end = Carbon::parse($jatuhTempo)->startOfDay();
+        
+        // diffInDays 12 ke 26 adalah 14. + 1 supaya jadi 15.
+        return (int) $start->diffInDays($end) + 1;
+    }
+
+    /**
+     * Mendeteksi Paket Tenor
      */
     public function deteksiTenor($tanggalGadai, $jatuhTempo)
     {
-        $start = Carbon::parse($tanggalGadai);
-        $end = Carbon::parse($jatuhTempo);
-        
-        // diffInDays murni + 1 hari karena tanggal mulai dihitung sebagai hari ke-1
-        $selisih = (int) $start->diffInDays($end) + 1;
-
+        $selisih = $this->hitungTenorMurni($tanggalGadai, $jatuhTempo);
         return ($selisih <= 15) ? 15 : 30;
     }
 
     /**
-     * Hitung Telat dengan Toleransi H+1
-     * JT tgl 15 -> Bayar tgl 16 (Telat 1 hari - 1 = 0) -> AMAN
-     * JT tgl 15 -> Bayar tgl 17 (Telat 2 hari - 1 = 1) -> DENDA 1 HARI
+     * Hitung Hari Telat (Toleransi H+1)
      */
     public function hitungHariTelat($jatuhTempo, $tanggalAcuan = null)
     {
-        $acuan = $tanggalAcuan ? Carbon::parse($tanggalAcuan) : Carbon::now();
-        $jt = Carbon::parse($jatuhTempo);
+        $acuan = $tanggalAcuan ? Carbon::parse($tanggalAcuan)->startOfDay() : Carbon::now()->startOfDay();
+        $jt = Carbon::parse($jatuhTempo)->startOfDay();
 
         if ($acuan->lte($jt)) return 0;
 
         $selisih = (int) $jt->diffInDays($acuan, false);
         
-        // SOP Toleransi 1 Hari
+        // Toleransi 1 hari setelah JT (H+1 aman)
         return max(0, $selisih - 1); 
     }
 }

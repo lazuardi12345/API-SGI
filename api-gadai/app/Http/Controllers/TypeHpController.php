@@ -21,30 +21,43 @@ class TypeHpController extends Controller
         return response()->json($query->paginate($perPage));
     }
 
-public function getByMerk($merkId)
+public function getByMerk(Request $request, $merkId)
 {
-    $types = TypeHp::with(['hargaTerbaru']) 
+    $perPage = $request->get('per_page', 10);
+    $search = $request->get('search');
+
+    $query = TypeHp::with(['hargaTerbaru'])
         ->withCount('grades')
         ->where('merk_hp_id', $merkId)
-        ->orderBy('nama_type', 'ASC')
-        ->get();
+        ->orderBy('nama_type', 'ASC');
 
-    $data = $types->map(function ($type) {
-        $harga = $type->hargaTerbaru; 
+    if ($search) {
+        $query->where('nama_type', 'like', "%{$search}%");
+    }
 
+    $paginatedData = $query->paginate($perPage);
+
+    // Transformasi isi data
+    $items = $paginatedData->getCollection()->map(function ($type) {
+        $harga = $type->hargaTerbaru;
         return [
             'id'                => $type->id,
-            'id_harga'          => $harga ? $harga->id : null, 
+            'id_harga'          => $harga ? $harga->id : null,
             'nama_type'         => $type->nama_type,
             'harga_barang'      => $harga ? $harga->harga_barang : 0,
-            'harga_pasar'       => $harga ? $harga->harga_pasar : 0, 
+            'harga_pasar'       => $harga ? $harga->harga_pasar : 0,
             'has_grade'         => $type->grades_count > 0,
-            'updated_at'        => $harga ? $harga->updated_at : null,
+            'updated_at'        => $type->updated_at,
             'updated_at_harga'  => $harga ? $harga->updated_at : null,
         ];
     });
-
-    return response()->json(['success' => true, 'data' => $data]);
+    return response()->json([
+        'success'  => true,
+        'data'     => $items, 
+        'page'     => $paginatedData->currentPage(),
+        'pageSize' => $paginatedData->perPage(),
+        'total'    => $paginatedData->total(),
+    ]);
 }
 
     public function store(Request $request)
