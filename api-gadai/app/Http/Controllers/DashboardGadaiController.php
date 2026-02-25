@@ -10,413 +10,182 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardGadaiController extends Controller
 {
-
-public function summary()
-{
-
-    $queryBeredar = DetailGadai::whereIn('status', ['proses', 'selesai']);
-    $jumlahBeredar = $queryBeredar->count();
-    $nominalBeredar = $queryBeredar->sum('uang_pinjaman');
-
-    $queryBelumLunas = DetailGadai::where('status', 'selesai');
-    $jumlahBelumLunas = $queryBelumLunas->count();
-    $nominalBelumLunas = $queryBelumLunas->sum('uang_pinjaman');
-    $queryLunas = DetailGadai::where('status', 'lunas');
-    $jumlahLunas = $queryLunas->count();
-    $nominalLunas = $queryLunas->sum('uang_pinjaman');
-
-    return response()->json([
-        'success' => true,
-        'data' => [
-            'beredar' => [
-                'jumlah' => $jumlahBeredar,
-                'nominal' => (float)$nominalBeredar
-            ],
-            'belum_lunas' => [
-                'jumlah' => $jumlahBelumLunas,
-                'nominal' => (float)$nominalBelumLunas
-            ],
-            'lunas' => [
-                'jumlah' => $jumlahLunas,
-                'nominal' => (float)$nominalLunas
-            ]
-        ]
-    ]);
-}
-
-
-    public function pendapatanPerBulan()
+    /**
+     * Endpoint Tunggal Dashboard - Menggabungkan semua statistik
+     */
+    public function index(Request $request)
     {
-        $tahunSekarang = Carbon::now()->year;
+        try {
+            $tahunSekarang = $request->query('tahun', Carbon::now()->year);
+            $bulanSekarang = Carbon::now()->month;
 
-        $data = DetailGadai::select(
-                DB::raw('MONTH(tanggal_gadai) as bulan'),
-                DB::raw('SUM(uang_pinjaman) as total_pinjaman')
-            )
-            ->whereYear('tanggal_gadai', $tahunSekarang)
-            ->groupBy('bulan')
-            ->get()
-            ->pluck('total_pinjaman', 'bulan')
-            ->toArray();
+            // --- 1. SUMMARY GADAI (Beredar, Belum Lunas, Lunas) ---
+            $queryBeredar = DetailGadai::whereIn('status', ['proses', 'selesai']);
+            $queryBelumLunas = DetailGadai::where('status', 'selesai');
+            $queryLunas = DetailGadai::where('status', 'lunas');
 
-        $result = [];
-        for ($i = 1; $i <= 12; $i++) {
-            $result[] = [
-                'bulan' => Carbon::create()->month($i)->locale('id')->monthName,
-                'total_pinjaman' => (int)($data[$i] ?? 0),
-                'total_pinjaman_formatted' => 'Rp ' . number_format(($data[$i] ?? 0), 0, ',', '.')
+            $summaryGadai = [
+                'beredar' => [
+                    'jumlah' => (int) $queryBeredar->count(),
+                    'nominal' => (float) $queryBeredar->sum('uang_pinjaman')
+                ],
+                'belum_lunas' => [ // Selesai tapi belum Lunas
+                    'jumlah' => (int) $queryBelumLunas->count(),
+                    'nominal' => (float) $queryBelumLunas->sum('uang_pinjaman')
+                ],
+                'lunas' => [
+                    'jumlah' => (int) $queryLunas->count(),
+                    'nominal' => (float) $queryLunas->sum('uang_pinjaman')
+                ]
             ];
-        }
 
-        return response()->json([
-            'success' => true,
-            'tahun' => $tahunSekarang,
-            'data' => $result
-        ]);
-    }
-
-
-    public function nasabahPerBulan()
-    {
-        $tahunSekarang = Carbon::now()->year;
-
-        $data = DetailGadai::select(
+            // --- 2. STATISTIK BULANAN (Pendapatan & Nasabah) ---
+            $dataBulananGadai = DetailGadai::select(
                 DB::raw('MONTH(tanggal_gadai) as bulan'),
+                DB::raw('SUM(uang_pinjaman) as total_pinjaman'),
                 DB::raw('COUNT(DISTINCT nasabah_id) as total_nasabah')
             )
             ->whereYear('tanggal_gadai', $tahunSekarang)
             ->groupBy('bulan')
             ->get()
-            ->pluck('total_nasabah', 'bulan')
-            ->toArray();
+            ->keyBy('bulan');
 
+            $chartGadai = [];
+            for ($i = 1; $i <= 12; $i++) {
+                $item = $dataBulananGadai->get($i);
+                $chartGadai[] = [
+                    'bulan' => Carbon::create()->month($i)->locale('id')->monthName,
+                    'total_pinjaman' => (int)($item->total_pinjaman ?? 0),
+                    'total_nasabah' => (int)($item->total_nasabah ?? 0),
+                ];
+            }
 
-        $result = [];
-        for ($i = 1; $i <= 12; $i++) {
-            $result[] = [
-                'bulan' => Carbon::create()->month($i)->locale('id')->monthName,
-                'total_nasabah' => (int)($data[$i] ?? 0)
+            // --- 3. TOTAL UNIT PER JENIS (Global & Bulanan) ---
+            $tables = ['gadai_hp', 'gadai_perhiasan', 'gadai_retro', 'gadai_logam_mulia'];
+            $totalUnitPerJenis = [];
+            $totalUnitGlobal = 0;
+            $unitBulananRaw = [];
+
+            foreach ($tables as $table) {
+                $count = DB::table($table)->count();
+                $key = str_replace('gadai_', '', $table);
+                $totalUnitPerJenis[$key] = $count;
+                $totalUnitGlobal += $count;
+
+                $unitBulananRaw[$key] = DB::table($table)
+                    ->select(DB::raw('MONTH(created_at) as bulan'), DB::raw('COUNT(id) as total'))
+                    ->whereYear('created_at', $tahunSekarang)
+                    ->groupBy('bulan')
+                    ->pluck('total', 'bulan')
+                    ->toArray();
+            }
+
+            $chartUnitDetail = [];
+            for ($i = 1; $i <= 12; $i++) {
+                $chartUnitDetail[] = [
+                    'bulan' => Carbon::create()->month($i)->locale('id')->monthName,
+                    'hp' => $unitBulananRaw['hp'][$i] ?? 0,
+                    'perhiasan' => $unitBulananRaw['perhiasan'][$i] ?? 0,
+                    'retro' => $unitBulananRaw['retro'][$i] ?? 0,
+                    'logam_mulia' => $unitBulananRaw['logam_mulia'][$i] ?? 0,
+                ];
+            }
+
+            // --- 4. PELELANGAN STATS ---
+            $pelelanganRaw = Pelelangan::with(['detailGadai.type'])->get();
+            
+            $pelelanganSummary = [
+                'siap' => [
+                    'jumlah' => $pelelanganRaw->where('status_lelang', 'siap')->count(),
+                    'nominal' => (float) $pelelanganRaw->where('status_lelang', 'siap')->sum(fn($p) => $p->detailGadai->uang_pinjaman ?? 0)
+                ],
+                'terlelang' => [
+                    'jumlah' => $pelelanganRaw->where('status_lelang', 'terlelang')->count(),
+                    'nominal' => (float) $pelelanganRaw->where('status_lelang', 'terlelang')->sum('harga_terjual')
+                ],
+                'lunas' => [
+                    'jumlah' => $pelelanganRaw->where('status_lelang', 'lunas')->count(),
+                    'nominal' => (float) $pelelanganRaw->where('status_lelang', 'lunas')->sum(fn($p) => $this->hitungKalkulasi($p->detailGadai, $p->tanggal_pelunasan ?? now())['total_hutang'])
+                ]
             ];
+
+            // --- 5. BRANKAS DASHBOARD & CHART ---
+            $terakhirBrankas = DB::table('transaksi_brankas')->orderBy('id', 'desc')->first();
+            $mutasiBrankasRaw = DB::table('transaksi_brankas')
+                ->select(DB::raw('MONTH(created_at) as bulan'), DB::raw('SUM(pemasukan) as total_masuk'), DB::raw('SUM(pengeluaran) as total_keluar'))
+                ->whereYear('created_at', $tahunSekarang)
+                ->groupBy('bulan')->get()->keyBy('bulan');
+
+            $brankasChart = ['masuk' => [], 'keluar' => [], 'kumulatif' => [], 'labels' => []];
+            $currentSaldoKumulatif = 0;
+
+            for ($i = 1; $i <= 12; $i++) {
+                $m = $mutasiBrankasRaw->get($i);
+                $in = (int)($m->total_masuk ?? 0);
+                $out = (int)($m->total_keluar ?? 0);
+                $currentSaldoKumulatif += ($in - $out);
+
+                $brankasChart['masuk'][] = $in;
+                $brankasChart['keluar'][] = $out;
+                $brankasChart['kumulatif'][] = $currentSaldoKumulatif;
+                $brankasChart['labels'][] = Carbon::create()->month($i)->locale('id')->shortMonthName;
+            }
+
+            // --- FINAL RESPONSE ---
+            return response()->json([
+                'success' => true,
+                'message' => 'Dashboard Data Loaded Successfully',
+                'meta' => [
+                    'tahun' => (int)$tahunSekarang,
+                    'bulan_nama' => Carbon::now()->locale('id')->monthName,
+                ],
+                'data' => [
+                    'gadai_summary' => $summaryGadai,
+                    'gadai_chart' => $chartGadai,
+                    'unit_stats' => [
+                        'total_global' => $totalUnitGlobal,
+                        'per_jenis' => $totalUnitPerJenis,
+                        'chart_detail' => $chartUnitDetail
+                    ],
+                    'pelelangan' => [
+                        'summary' => $pelelanganSummary
+                    ],
+                    'brankas' => [
+                        'summary' => [
+                            'saldo_toko' => (int)($terakhirBrankas->saldo_akhir ?? 0),
+                            'saldo_rekening' => (int)($terakhirBrankas->saldo_akhir_rekening ?? 0),
+                            'modal_pusat' => (int)DB::table('transaksi_brankas')->where('kategori', 'topup_pusat')->sum('pemasukan'),
+                            'setoran_admin' => (int)DB::table('transaksi_brankas')->where('kategori', 'setor_ke_admin')->where('status_validasi', 'tervalidasi')->sum('pengeluaran'),
+                        ],
+                        'chart' => $brankasChart
+                    ]
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'tahun' => $tahunSekarang,
-            'data' => $result
-        ]);
     }
 
-
-public function totalSemua()
-{
-    $tahun = Carbon::now()->year;
-
-
-    $totalHp = DB::table('gadai_hp')->count();
-    $totalPerhiasan = DB::table('gadai_perhiasan')->count();
-    $totalRetro = DB::table('gadai_retro')->count();
-    $totalLogamMulia = DB::table('gadai_logam_mulia')->count();
-
-    $totalGlobal = $totalHp + $totalPerhiasan + $totalRetro + $totalLogamMulia;
-
-    $ambilDataBulanan = function ($table) use ($tahun) {
-        return DB::table($table)
-            ->select(
-                DB::raw('MONTH(created_at) as bulan'),
-                DB::raw('COUNT(id) as total')
-            )
-            ->whereYear('created_at', $tahun)
-            ->groupBy('bulan')
-            ->pluck('total', 'bulan')
-            ->toArray();
-    };
-
-    $dataHp = $ambilDataBulanan('gadai_hp');
-    $dataPerhiasan = $ambilDataBulanan('gadai_perhiasan');
-    $dataRetro = $ambilDataBulanan('gadai_retro');
-    $dataLogamMulia = $ambilDataBulanan('gadai_logam_mulia');
-
-    $result = [];
-    for ($i = 1; $i <= 12; $i++) {
-        $hpBulan = $dataHp[$i] ?? 0;
-        $perhiasanBulan = $dataPerhiasan[$i] ?? 0;
-        $retroBulan = $dataRetro[$i] ?? 0;
-        $logamMuliaBulan = $dataLogamMulia[$i] ?? 0;
-
-        $totalSemuaBulan = $hpBulan + $perhiasanBulan + $retroBulan + $logamMuliaBulan;
-
-        $result[] = [
-            'bulan' => Carbon::create()->month($i)->locale('id')->monthName,
-            'hp' => $hpBulan,
-            'perhiasan' => $perhiasanBulan,
-            'retro' => $retroBulan,
-            'logam_mulia' => $logamMuliaBulan,
-            'total_unit_bulan' => $totalSemuaBulan,
-        ];
-    }
-
-    return response()->json([
-        'success' => true,
-        'tahun' => $tahun,
-        'total_unit_per_jenis' => [
-            'hp' => $totalHp,
-            'perhiasan' => $totalPerhiasan,
-            'retro' => $totalRetro,
-            'logam_mulia' => $totalLogamMulia,
-        ],
-        'total_unit_global' => $totalGlobal,
-        'data_bulanan' => $result
-    ]);
-}
-
-
-public function pelelanganStats()
-{
-    $tahun = Carbon::now()->year;
-
-    $baseQuery = Pelelangan::with(['detailGadai.type']);
-
-    $siap = (clone $baseQuery)
-        ->where('status_lelang', 'siap')
-        ->get();
-
-    $totalSiap = [
-        'jumlah' => $siap->count(),
-        'nominal' => $siap->sum(function ($p) {
-            return (float) ($p->detailGadai->uang_pinjaman ?? 0);
-        }),
-    ];
-
-
-    $terlelang = (clone $baseQuery)
-        ->where('status_lelang', 'terlelang')
-        ->get();
-
-    $totalTerlelang = [
-        'jumlah' => $terlelang->count(),
-        'nominal' => $terlelang->sum(function ($p) {
-            return (float) ($p->harga_terjual ?? 0);
-        }),
-    ];
-
-    $lunas = (clone $baseQuery)
-        ->where('status_lelang', 'lunas')
-        ->get();
-
-    $totalLunas = [
-        'jumlah' => $lunas->count(),
-        'nominal' => $lunas->sum(function ($p) {
-            if (!$p->detailGadai) return 0;
-
-            $kalkulasi = $this->hitungKalkulasi(
-                $p->detailGadai,
-                $p->tanggal_pelunasan ?? now()
-            );
-
-            return (float) $kalkulasi['total_hutang'];
-        }),
-    ];
-
-    $dataBulanan = [];
-
-    for ($bulan = 1; $bulan <= 12; $bulan++) {
-
-        $queryBulan = (clone $baseQuery)
-            ->whereYear('created_at', $tahun)
-            ->whereMonth('created_at', $bulan);
-
-        $siapBulan = (clone $queryBulan)
-            ->where('status_lelang', 'siap')
-            ->get();
-
-        $terlelangBulan = (clone $queryBulan)
-            ->where('status_lelang', 'terlelang')
-            ->get();
-
-        $lunasBulan = (clone $queryBulan)
-            ->where('status_lelang', 'lunas')
-            ->get();
-
-        $dataBulanan[] = [
-            'bulan' => Carbon::create()->month($bulan)->locale('id')->monthName,
-
-            'siap' => [
-                'jumlah' => $siapBulan->count(),
-                'nominal' => $siapBulan->sum(function ($p) {
-                    return (float) ($p->detailGadai->uang_pinjaman ?? 0);
-                }),
-            ],
-
-            'terlelang' => [
-                'jumlah' => $terlelangBulan->count(),
-                'nominal' => $terlelangBulan->sum(function ($p) {
-                    return (float) ($p->harga_terjual ?? 0);
-                }),
-            ],
-
-            'lunas' => [
-                'jumlah' => $lunasBulan->count(),
-                'nominal' => $lunasBulan->sum(function ($p) {
-                    if (!$p->detailGadai) return 0;
-
-                    $kalkulasi = $this->hitungKalkulasi(
-                        $p->detailGadai,
-                        $p->tanggal_pelunasan ?? now()
-                    );
-
-                    return (float) $kalkulasi['total_hutang'];
-                }),
-            ],
-        ];
-    }
-
-    return response()->json([
-        'success' => true,
-        'tahun' => $tahun,
-        'total' => [
-            'siap' => $totalSiap,
-            'terlelang' => $totalTerlelang,
-            'lunas' => $totalLunas,
-        ],
-        'data_bulanan' => $dataBulanan,
-    ]);
-}
-
-
-private function hitungKalkulasi($detail, $tanggalAcuan = null)
+    /**
+     * Helper Fungsi Kalkulasi (Private)
+     */
+    private function hitungKalkulasi($detail, $tanggalAcuan = null)
     {
+        if (!$detail) return ['total_hutang' => 0];
         $tanggalAcuan = $tanggalAcuan ?? now();
-
-        $hariTerlambat = Carbon::parse($detail->jatuh_tempo)
-            ->diffInDays($tanggalAcuan, false);
-
-        $hariTerlambat = max($hariTerlambat, 0);
-
-        $penalty = 180;
-
-        $bulanGadai = Carbon::parse($detail->tanggal_gadai)
-            ->diffInMonths($tanggalAcuan);
-
-        $bunga = $detail->uang_pinjaman * 0.01 * max($bulanGadai, 1);
-
+        $hariTerlambat = max(Carbon::parse($detail->jatuh_tempo)->diffInDays($tanggalAcuan, false), 0);
+        
+        $bulanGadai = max(Carbon::parse($detail->tanggal_gadai)->diffInMonths($tanggalAcuan), 1);
+        $bunga = $detail->uang_pinjaman * 0.01 * $bulanGadai;
+        
         $denda = 0;
         if ($hariTerlambat > 0) {
             $jenisBarang = strtolower($detail->type->nama_type ?? '');
-            $rate = (str_contains($jenisBarang, 'hp') || str_contains($jenisBarang, 'handphone'))
-                ? 0.003
-                : 0.0015;
-
+            $rate = (str_contains($jenisBarang, 'hp') || str_contains($jenisBarang, 'handphone')) ? 0.003 : 0.0015;
             $denda = $detail->uang_pinjaman * $rate * $hariTerlambat;
         }
 
-        return [
-            'hari_terlambat' => $hariTerlambat,
-            'bunga' => $bunga,
-            'penalty' => $penalty,
-            'denda' => $denda,
-            'total_hutang' => $detail->uang_pinjaman + $bunga + $penalty + $denda,
-        ];
+        return ['total_hutang' => $detail->uang_pinjaman + $bunga + 180 + $denda];
     }
-
-
-public function brankasDashboard()
-{
-    try {
-        $terakhir = DB::table('transaksi_brankas')
-            ->orderBy('id', 'desc')
-            ->first();
-        $bulanSekarang = now()->month;
-        $tahunSekarang = now()->year;
-        $totalModalPusat = (float) DB::table('transaksi_brankas')
-            ->where('kategori', 'topup_pusat')
-            ->sum('pemasukan');
-
-        $totalSetoranTervalidasi = (float) DB::table('transaksi_brankas')
-            ->where('kategori', 'setor_ke_admin')
-            ->where('status_validasi', 'tervalidasi')
-            ->sum('pengeluaran');
-
-        $totalSetoranPending = (float) DB::table('transaksi_brankas')
-            ->where('kategori', 'setor_ke_admin')
-            ->where('status_validasi', 'pending')
-            ->sum('pengeluaran');
-        $totalMasukBulanan = DB::table('transaksi_brankas')
-            ->whereMonth('created_at', $bulanSekarang)
-            ->whereYear('created_at', $tahunSekarang)
-            ->sum('pemasukan') ?? 0;
-
-        $totalKeluarBulanan = DB::table('transaksi_brankas')
-            ->whereMonth('created_at', $bulanSekarang)
-            ->whereYear('created_at', $tahunSekarang)
-            ->sum('pengeluaran') ?? 0;
-
-        return response()->json([
-            'success' => true,
-            'summary' => [
-                'saldo_toko_saat_ini' => (int) ($terakhir->saldo_akhir ?? 0),
-                'saldo_rekening_saat_ini' => (int) ($terakhir->saldo_akhir_rekening ?? 0),
-                'total_modal_dari_pusat' => (int) $totalModalPusat,
-                'total_setoran_ke_admin' => (int) $totalSetoranTervalidasi,
-                'total_setoran_pending' => (int) $totalSetoranPending,
-                'total_pemasukan_bulan_ini' => (int) $totalMasukBulanan,
-                'total_pengeluaran_bulan_ini' => (int) $totalKeluarBulanan,
-            ],
-            'info' => [
-                'bulan' => now()->locale('id')->monthName,
-                'tahun' => $tahunSekarang
-            ]
-        ]);
-    } catch (\Exception $e) {
-        return response()->json([
-            'success' => false,
-            'message' => $e->getMessage()
-        ], 500);
-    }
-}
-
-public function brankasYearlyChart(Request $request)
-{
-    try {
-        $tahun = $request->query('tahun', now()->year);
-
-        $mutasiBulanan = DB::table('transaksi_brankas')
-            ->select(
-                DB::raw('MONTH(created_at) as bulan'),
-                DB::raw('SUM(pemasukan) as total_masuk'),
-                DB::raw('SUM(pengeluaran) as total_keluar')
-            )
-            ->whereYear('created_at', $tahun)
-            ->groupBy(DB::raw('MONTH(created_at)'))
-            ->orderBy('bulan', 'asc')
-            ->get();
-
-        $pemasukan = array_fill(0, 12, 0);
-        $pengeluaran = array_fill(0, 12, 0);
-        $saldoBulanan = array_fill(0, 12, 0); 
-
-        foreach ($mutasiBulanan as $data) {
-            $pemasukan[$data->bulan - 1] = (int)$data->total_masuk;
-            $pengeluaran[$data->bulan - 1] = (int)$data->total_keluar;
-        }
-
-        $currentSaldo = 0;
-        for ($i = 0; $i < 12; $i++) {
-            $currentSaldo += ($pemasukan[$i] - $pengeluaran[$i]);
-            $saldoBulanan[$i] = $currentSaldo;
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'pemasukan' => $pemasukan,
-                'pengeluaran' => $pengeluaran,
-                'saldo_kumulatif' => $saldoBulanan,
-                'labels' => ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
-            ]
-        ]);
-    } catch (\Exception $e) {
-        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-    }
-}
-
 }

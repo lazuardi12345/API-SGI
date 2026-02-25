@@ -40,7 +40,7 @@ class DokumenPendukungHp extends Model
 
         $appUrl = rtrim(env('APP_URL'), '/');
 
-        return "{$appUrl}/api/files/{$path}";
+        return "{$appUrl}/files/{$path}";
     }
 
     public function getBodyAttribute($value)         { return $this->convertPathToUrl($value); }

@@ -106,43 +106,53 @@ class DataNasabahController extends Controller
     }
 
     public function update(Request $request, $id)
-    {
-        $nasabah = DataNasabah::find($id);
-        if (!$nasabah) return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+{
+    $nasabah = DataNasabah::find($id);
+    if (!$nasabah) return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
 
-        $validator = Validator::make($request->all(), [
-            'nama_lengkap' => 'sometimes|required|string|max:255',
-            'nik'          => 'sometimes|required|string|max:20|unique:data_nasabah,nik,' . $id,
-            'bank'         => 'sometimes|required|string|in:' . implode(',', $this->bankList),
-            'no_rek'  => 'sometimes|required|string|max:30',
-            'foto_ktp'     => 'sometimes|image|mimes:jpg,jpeg,png|max:2048',
-        ]);
+    $validator = Validator::make($request->all(), [
+        'nama_lengkap' => 'sometimes|required|string|max:255',
+        'nik'          => 'sometimes|required|string|max:20|unique:data_nasabah,nik,' . $id,
+        'bank'         => 'sometimes|required|string|in:' . implode(',', $this->bankList),
+        'no_rek'       => 'sometimes|required|string|max:30',
+        'foto_ktp'     => 'sometimes|nullable|image|mimes:jpg,jpeg,png|max:2048', // Tambahkan nullable
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-        }
-        $nasabah->update($request->only(['nama_lengkap', 'nik', 'alamat', 'no_hp', 'bank', 'no_rek']));
-
-        if ($request->hasFile('foto_ktp')) {
-            if ($nasabah->foto_ktp) {
-                $oldPath = str_replace(url("api/files/"), "", $nasabah->getRawOriginal('foto_ktp'));
-                Storage::disk('minio')->delete($oldPath);
-            }
-
-            $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
-            $namaFile = 'ktp_' . $nasabah->nik . '_' . time() . '.' . $request->file('foto_ktp')->getClientOriginalExtension();
-            $path = $request->file('foto_ktp')->storeAs("pawned-items/{$folderNasabah}/ktp", $namaFile, 'minio');
-            
-            $nasabah->foto_ktp = $path;
-            $nasabah->save();
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Data nasabah berhasil diperbarui.',
-            'data'    => $nasabah->load('user:id,name,role'),
-        ], 200);
+    if ($validator->fails()) {
+        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
     }
+
+    // 1. Ambil data teks saja, jangan masukkan foto_ktp ke sini dulu
+    $dataUpdate = $request->only(['nama_lengkap', 'nik', 'alamat', 'no_hp', 'bank', 'no_rek']);
+    
+    // 2. Lakukan update data teks
+    $nasabah->fill($dataUpdate);
+
+    // 3. Cek apakah ada upload foto baru
+    if ($request->hasFile('foto_ktp')) {
+        // Hapus foto lama di Minio jika ada
+        if ($nasabah->getRawOriginal('foto_ktp')) {
+            $oldPath = str_replace(url("api/files/"), "", $nasabah->getRawOriginal('foto_ktp'));
+            Storage::disk('minio')->delete($oldPath);
+        }
+
+        // Simpan foto baru
+        $folderNasabah = preg_replace('/[^A-Za-z0-9\-]/', '_', $nasabah->nama_lengkap);
+        $namaFile = 'ktp_' . $nasabah->nik . '_' . time() . '.' . $request->file('foto_ktp')->getClientOriginalExtension();
+        $path = $request->file('foto_ktp')->storeAs("pawned-items/{$folderNasabah}/ktp", $namaFile, 'minio');
+        
+        $nasabah->foto_ktp = $path;
+    }
+
+    // 4. Save sekali saja di akhir untuk efisiensi
+    $nasabah->save();
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Data nasabah berhasil diperbarui.',
+        'data'    => $nasabah->load('user:id,name,role'),
+    ], 200);
+}
 
     public function destroy($id)
     {

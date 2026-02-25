@@ -22,9 +22,9 @@ public function up(): void
         $table->decimal('uang_pinjaman', 15, 2);
         $table->enum('status', ['proses', 'selesai', 'lunas'])->default('proses');
         
-        // --- TAMBAHAN BARU ---
+
         $table->boolean('is_repeat')->default(0)->comment('0: Baru, 1: Repeat Order');
-        // ---------------------
+
 
         $table->enum('approval_status', ['draft', 'pending', 'approved', 'rejected'])
               ->default('draft')

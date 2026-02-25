@@ -10,16 +10,21 @@ return new class extends Migration
     {
         Schema::create('pelelangan', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('detail_gadai_id') ->unique()->constrained('detail_gadai')->onDelete('cascade');
+            $table->foreignId('detail_gadai_id')->unique()->constrained('detail_gadai')->onDelete('cascade');
             $table->enum('status_lelang', ['siap', 'terlelang', 'lunas'])->default('siap');
-            $table->decimal('nominal_diterima', 15, 2)->nullable(); // Harga terjual atau nominal tebus
-            $table->decimal('keuntungan_lelang', 15, 2)->nullable();
+
+            $table->decimal('nominal_pokok', 15, 2)->default(0);    
+            $table->decimal('nominal_jasa', 15, 2)->default(0);     
+            $table->decimal('nominal_denda', 15, 2)->default(0);    
+            $table->decimal('nominal_penalty', 15, 2)->default(0);  
+            $table->decimal('total_tagihan', 15, 2)->default(0);    
+            $table->decimal('nominal_diterima', 15, 2)->nullable(); 
+            $table->decimal('keuntungan_lelang', 15, 2)->nullable(); 
             
             $table->enum('metode_pembayaran', ['cash', 'transfer'])->nullable();
             $table->timestamp('waktu_bayar')->nullable(); 
             $table->string('bukti_transfer')->nullable(); 
             
-            // 4. Informasi Tambahan
             $table->text('keterangan')->nullable();
             $table->timestamps();
         });

@@ -18,22 +18,13 @@ class GradeCalculatorService
 
     public function calculateAllGrades(int $hargaBarang, string $pasarTrend = 'turun'): array
     {
-        // 1. GRADE A DUS (BASE)
-        // SOP: (Harga - 20%) +/- Adjustment
+
         $baseGradeA = $this->calculateGradeABase($hargaBarang, $pasarTrend);
         $gradeADus = $baseGradeA + self::ADDITIONAL_FEE;
-
-        // 2. GRADE A TANPA DUS
-        // SOP: Grade A - 15%
         $baseGradeATanpaDus = $this->roundPrice($baseGradeA * 0.85);
-        // Validasi: Tidak boleh lebih dari Grade A
         if ($baseGradeATanpaDus >= $baseGradeA) $baseGradeATanpaDus = $baseGradeA - 50000;
         $gradeATanpaDus = $baseGradeATanpaDus + self::ADDITIONAL_FEE;
-
-        // 3. GRADE B DUS
-        // SOP: (Grade A - 10%) + 50.000
         $baseGradeBDus = $this->roundPrice(($baseGradeA * 0.90) + 50000);
-        // Validasi Krusial: Grade B tidak boleh >= Grade A
         if ($baseGradeBDus >= $baseGradeA) {
             $baseGradeBDus = $baseGradeA - 50000;
         }
@@ -114,5 +105,18 @@ class GradeCalculatorService
     } else {
         return (int) ($ratusanRibu + 100000);
     }
+}
+
+public function calculateFinalLoan(int $baseGradePrice, float $totalPersenKerusakan): array
+{
+    $multiplier = max(0, min(1, (100 - $totalPersenKerusakan) / 100));
+
+    $finalPinjaman = $baseGradePrice * $multiplier;
+    $finalTaksiran = $this->calculateTaksiran($finalPinjaman);
+
+    return [
+        'pinjaman' => floor($finalPinjaman / 1000) * 1000,
+        'taksiran' => floor($finalTaksiran / 1000) * 1000,
+    ];
 }
 }

@@ -34,4 +34,37 @@ public function getUsersByRoles(Request $request): JsonResponse
         'data'    => $users
     ]);
 }
+
+public function getPegawaiSGI(Request $request): JsonResponse
+{
+    try {
+        $roleNames = [
+            'admin'   => 'Administrator',
+            'checker' => 'Kepala Toko',
+            'petugas' => 'Petugas Lapangan',
+            'gudang'  => 'Staff Gudang',
+            'kasir'   => 'Kasir',
+        ];
+
+        $users = User::whereNotIn('role', ['hm'])
+            ->select('id', 'name', 'role')
+            ->get();
+
+        $formattedUsers = $users->map(function ($user) use ($roleNames) {
+            return [
+                'id'        => $user->id,
+                'nama'      => $user->name,
+                'role'      => $user->role, 
+                'role_name' => $roleNames[$user->role] ?? 'Staff' 
+            ];
+        })->groupBy('role'); 
+
+        return response()->json([
+            'success' => true,
+            'data'    => $formattedUsers
+        ]);
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+    }
+}
 }

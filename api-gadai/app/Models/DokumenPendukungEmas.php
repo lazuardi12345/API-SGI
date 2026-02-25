@@ -29,7 +29,7 @@ class DokumenPendukungEmas extends Model
     private function generateUrl($value)
     {
         if (!$value) return null;
-        return url("/api/files/{$value}");
+        return url("/files/{$value}");
     }
 
     public function getEmasTimbanganUrlAttribute()

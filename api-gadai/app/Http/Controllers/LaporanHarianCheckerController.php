@@ -494,25 +494,37 @@ public function getReportHistory(Request $request)
     }
 
 
-    public function approveReport(Request $request, $doc_id)
-    {
-        try {
-            $report = ReportPrint::where('doc_id', $doc_id)->firstOrFail();
-            $report->update([
-                'is_approved' => true,
+   public function approveReport(Request $request, $doc_id = null)
+{
+    try {
+        DB::beginTransaction();
+        $docIds = $request->input('doc_ids'); 
+        if (!$docIds && $doc_id) {
+            $docIds = [$doc_id];
+        }
+
+        if (empty($docIds)) {
+            return response()->json(['success' => false, 'message' => 'Pilih laporan dulu brader!'], 400);
+        }
+        $updatedCount = ReportPrint::whereIn('doc_id', $docIds)
+            ->update([
+                'is_approved' => 1, 
                 'approved_by' => auth()->user()->name,
-                'approved_at' => now(),
             ]);
 
-            return response()->json([
-                'success' => true, 
-                'message' => "Laporan [{$doc_id}] berhasil di-ACC.",
-                'data' => $report
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-        }
+        DB::commit();
+
+        return response()->json([
+            'success' => true, 
+            'message' => "{$updatedCount} Laporan resmi di-ACC Manager!",
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('[ApproveReport] Error: ' . $e->getMessage());
+        return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
     }
+}
     
 
     public function publicVerify(Request $request, $doc_id)

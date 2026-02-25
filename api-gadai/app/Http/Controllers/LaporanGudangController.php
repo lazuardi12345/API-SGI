@@ -128,63 +128,75 @@ class LaporanGudangController extends Controller
         }
 
         $userLogin = Auth::user();
-        $daftarUsers = $this->getListUsers();
+$daftarUsers = $this->getListUsers();
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'detail_gadai_id' => $gadai->id,
-                'no_gadai'        => $gadai->no_gadai,
-                'nasabah'         => $gadai->nasabah->nama_lengkap ?? '-',
-                'barang'          => $this->getNamaBarang($gadai),
-                'detail'          => $this->getDetailSpesifik($gadai),
-                'status_gadai'    => strtoupper($gadai->status),
-                'aksi'            => $aksi,
-                'penyerah'        => [
-                    'id'   => $userLogin->id,
-                    'name' => $userLogin->name,
-                    'role' => $userLogin->role_name ?? ucfirst($userLogin->role)
-                ],
-                'list_users'      => $daftarUsers  // ← LIST USER LANGSUNG DI SINI!
-            ]
-        ]);
+return response()->json([
+    'success' => true,
+    'data' => [
+        'detail_gadai_id' => $gadai->id,
+        'no_gadai'        => $gadai->no_gadai,
+        'nasabah'         => $gadai->nasabah->nama_lengkap ?? '-',
+        'barang'          => $this->getNamaBarang($gadai),
+        'detail'          => $this->getDetailSpesifik($gadai),
+        'status_gadai'    => strtoupper($gadai->status),
+        'aksi'            => $aksi,
+
+
+        'penyerah' => $aksi === 'keluar' 
+            ? ['id' => $userLogin->id, 'name' => $userLogin->name, 'role' => $userLogin->role_name ?? ucfirst($userLogin->role), 'is_fixed' => true]
+            : ['id' => null, 'name' => null, 'is_fixed' => false],
+
+        'penerima' => $aksi === 'masuk'
+            ? ['id' => $userLogin->id, 'name' => $userLogin->name, 'role' => $userLogin->role_name ?? ucfirst($userLogin->role), 'is_fixed' => true]
+            : ['id' => null, 'name' => null, 'is_fixed' => false],
+
+        'list_users' => $daftarUsers
+    ]
+]);
     }
 
     /**
      * Simpan Verifikasi Akhir
      */
-    public function storeVerifikasi(Request $request)
-    {
-        $request->validate([
-            'detail_gadai_id'  => 'required|exists:detail_gadai,id',
-            'penerima_id'      => 'required|exists:users,id',
-            'jenis_pergerakan' => 'required|in:masuk,keluar',
-            'keterangan'       => 'nullable|string'
+   public function storeVerifikasi(Request $request)
+{
+    $request->validate([
+        'detail_gadai_id'  => 'required|exists:detail_gadai,id',
+        'user_pilihan_id'  => 'required|exists:users,id', // user yang DIPILIH (dropdown)
+        'jenis_pergerakan' => 'required|in:masuk,keluar',
+        'keterangan'       => 'nullable|string'
+    ]);
+
+    // MASUK  → penyerah = dipilih, penerima = login
+    // KELUAR → penyerah = login,   penerima = dipilih
+    $userLoginId   = Auth::id();
+    $userPilihanId = $request->user_pilihan_id;
+
+    $penyerahId = $request->jenis_pergerakan === 'masuk' ? $userPilihanId : $userLoginId;
+    $penerimaId = $request->jenis_pergerakan === 'masuk' ? $userLoginId  : $userPilihanId;
+
+    try {
+        DB::beginTransaction();
+
+        LaporanGudang::create([
+            'detail_gadai_id'  => $request->detail_gadai_id,
+            'user_id'          => $penyerahId,
+            'penerima_id'      => $penerimaId,
+            'jenis_pergerakan' => $request->jenis_pergerakan,
+            'keterangan'       => $request->keterangan ?? 'Verifikasi via Scan Barcode',
         ]);
 
-        try {
-            DB::beginTransaction();
+        DB::commit();
 
-            $log = LaporanGudang::create([
-                'detail_gadai_id'  => $request->detail_gadai_id,
-                'user_id'          => Auth::id(), // PENYERAH (Yang melakukan scan)
-                'penerima_id'      => $request->penerima_id, // PENERIMA (Yang dipilih dari dropdown)
-                'jenis_pergerakan' => $request->jenis_pergerakan,
-                'keterangan'       => $request->keterangan ?? 'Verifikasi via Scan Barcode',
-            ]);
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => "Barang berhasil dicatat sebagai ".strtoupper($request->jenis_pergerakan),
-                'data'    => $log
-            ]);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['success' => false, 'message' => 'Gagal simpan: ' . $e->getMessage()], 500);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => "Barang berhasil dicatat sebagai " . strtoupper($request->jenis_pergerakan)
+        ]);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['success' => false, 'message' => 'Gagal simpan: ' . $e->getMessage()], 500);
     }
+}
 
     // --- Private Helpers ---
 

@@ -12,6 +12,7 @@ use App\Http\Controllers\GadaiLogamMuliaController;
 use App\Http\Controllers\GadaiRetroController;
 use App\Http\Controllers\PerpanjanganTempoController;
 use App\Http\Controllers\DashboardGadaiController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ApprovalController;
 use App\Http\Controllers\ApprovalFilterController;
 use App\Http\Controllers\GadaiWizardController;
@@ -39,6 +40,12 @@ use App\Events\TransaksiBaru;
 use App\Http\Controllers\NotificationServiceController;
 use App\Http\Controllers\LaporanKasirController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\KwitansiController;
+use App\Http\Controllers\PenggajianController;
+use App\Http\Controllers\OperasionalController;
+use App\Http\Controllers\CashFlowController;
+use App\Http\Controllers\SuratKuasaController;
+use App\Http\Controllers\NotaKehilanganController;
 
 
 
@@ -82,6 +89,15 @@ Route::get('/test-notification', function() {
 
 
 
+Route::get('/hello', function () {
+    return response()->json([
+        'status' => true,
+        'message' => 'Hello World!',
+        'timestamp' => now(),
+    ]);
+});
+
+
 Route::get('/test-nestjs-connection', function() {
     $controller = app(NotificationServiceController::class);
     $result = $controller->testConnection();
@@ -121,6 +137,20 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('/notifications/history', [NotificationServiceController::class, 'getMyNotifications']);
     Route::patch('/notifications/{id}/read', [NotificationServiceController::class, 'markNotificationAsRead']);
     Route::patch('/notifications/read-all', [NotificationServiceController::class, 'markAllAsRead']);
+    Route::get('/kwitansi/{jenis}/{id}', [KwitansiController::class, 'cetak'])->name('kwitansi.cetak');
+    Route::get('/kwitansi/riwayat-hari-ini', [KwitansiController::class, 'riwayatHariIni']);
+    Route::post('/kwitansi/update-audit', [KwitansiController::class, 'updateAuditCetak']);
+    Route::get('/surat-kuasa', [SuratKuasaController::class, 'index']);
+    Route::get('/surat-kuasa/cetak/{id}', [SuratKuasaController::class, 'show']);
+    Route::patch('/surat-kuasa/create/{id}', [SuratKuasaController::class, 'store']);
+    Route::get('/surat-kuasa/search-gadai', [SuratKuasaController::class, 'searchGadai']);
+    Route::get('/surat-kuasa/search-gadai', [SuratKuasaController::class, 'searchGadai']);  
+    Route::PATCH('/surat-kuasa/update/{id}', [SuratKuasaController::class, 'update']);  
+    Route::get('/nota-kehilangan',                [NotaKehilanganController::class, 'index']);
+    Route::get('/nota-kehilangan/search-gadai',    [NotaKehilanganController::class, 'searchGadai']);
+    Route::get('/nota-kehilangan/{id}',            [NotaKehilanganController::class, 'show']);
+    Route::post('/nota-kehilangan',               [NotaKehilanganController::class, 'store']);
+    Route::post('/nota-kehilangan/{id}',           [NotaKehilanganController::class, 'update']);
 
 });
 
@@ -198,6 +228,7 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::apiResource('harga-hp', HargaHpController::class);
     Route::get('harga-hp/type/{typeHpId}', [HargaHpController::class, 'getByType']);
     Route::get('harga-hp/by-type/{typeHpId}', [HargaHpController::class, 'getByType']);
+    Route::get('grade-detail/{type_hp_id}', [HargaHpController::class, 'getGradeDetailByType']);
     
     // Grade HP - Full CRUD + Calculation Tools
     Route::apiResource('grade-hp', GradeHpController::class);
@@ -220,23 +251,26 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
 
 
     // Approvals
-    Route::get('/approvals', [ApprovalController::class, 'getAll']);
-    Route::get('/approvals/checker/approved', [ApprovalController::class, 'getCheckerApproved']); // buat method di controller
-    Route::get('/approvals/checker/rejected', [ApprovalController::class, 'getCheckerRejected']);
-    Route::get('/approvals/hm/approved', [ApprovalController::class, 'getHmApproved']);
-    Route::get('/approvals/hm/rejected', [ApprovalController::class, 'getHmRejected']);
-    Route::get('/approvals/selesai', [ApprovalController::class, 'getFinished']);
+    Route::get('approvals', [ApprovalController::class, 'getAll']);
+    Route::get('approvals/stats/count', [ApprovalController::class, 'getApprovalStats']);
+    
+    // Detail & Action
+    Route::get('approvals/{detailGadaiId}/full-detail', [ApprovalController::class, 'getApprovalDetail']);
+    Route::post('approvals/{detailGadaiId}', [ApprovalController::class, 'updateStatus']);
+    Route::post('approvals/{detailGadaiId}/update-detail', [ApprovalController::class, 'updateApprovalDetail']);
 
-    // Update status
-    Route::post('/approvals/{detailGadaiId}', [ApprovalController::class, 'updateStatus']);
-    Route::post('/approvals/{detailGadaiId}/update-detail', [ApprovalController::class, 'updateApprovalDetail']);
-    Route::get('/approvals/{detailGadaiId}/full-detail', [ApprovalController::class, 'getApprovalDetail']);
+    // Riwayat / History Berdasarkan Status
+    Route::get('approvals/history/checker-approved', [ApprovalController::class, 'getCheckerApproved']);
+    Route::get('approvals/history/checker-rejected', [ApprovalController::class, 'getCheckerRejected']);
+    Route::get('approvals/history/hm-approved', [ApprovalController::class, 'getHmApproved']);
+    Route::get('approvals/history/hm-rejected', [ApprovalController::class, 'getHmRejected']);
+    Route::get('approvals/history/finished', [ApprovalController::class, 'getFinished']);
 
     // dashboard
-    Route::get('summary', [DashboardGadaiController::class, 'summary']);
-    Route::get('pendapatan-bulanan', [DashboardGadaiController::class, 'pendapatanPerBulan']);
-    Route::get('nasabah-bulanan', [DashboardGadaiController::class, 'nasabahPerBulan']);
-    Route::get('total-semua', [DashboardGadaiController::class, 'totalSemua']);
+    Route::get('dashboard', [DashboardGadaiController::class, 'index']);
+    // Route::get('pendapatan-bulanan', [DashboardGadaiController::class, 'pendapatanPerBulan']);
+    // Route::get('nasabah-bulanan', [DashboardGadaiController::class, 'nasabahPerBulan']);
+    // Route::get('total-semua', [DashboardGadaiController::class, 'totalSemua']);
     Route::get('/approvals/finished/filter', [ApprovalFilterController::class, 'filterByMonthYear']);
     Route::get('laporan', [AdminApprovalController::class, 'index']);
     Route::get('laporan/detail/{detailGadaiId}', [AdminApprovalController::class, 'detailAdmin']);
@@ -273,8 +307,8 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::patch('brankas/validasi/{id}', [BrankasController::class, 'validasiSetoran']);
     Route::get('dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
     Route::get('manager/approvals/reports', [LaporanHarianCheckerController::class, 'getReportHistory']);
-    Route::post('manager/approvals/reports/{doc_id}/approve', [LaporanHarianCheckerController::class, 'approveReport']);
-    Route::post('manager/approvals/reports/bulk-approve', [YourController::class, 'bulkApproveReports']);
+    Route::post('manager/approvals/reports/approve/{doc_id?}', [LaporanHarianCheckerController::class, 'approveReport']);
+    // Route::post('manager/approvals/reports/bulk-approve', [YourController::class, 'bulkApproveReports']);
     Route::post('manager/approve-sbg/{id}', [DetailGadaiController::class, 'approveSBG']);
     Route::get('manager/gadai/list-sbg', [DetailGadaiController::class, 'getListSBGForManager']);
     Route::get('/manager/acc-history', [DetailGadaiController::class, 'getAccHistory']);
@@ -292,6 +326,11 @@ Route::middleware(['auth:api', 'role:hm'])->group(function () {
     Route::get('laporan-mingguan-detail', [AdminApprovalController::class, 'laporanMingguan']);
     Route::get('laporan/brankas', [LaporanKasirController::class, 'cetakLaporanBrankasHarian']);
     Route::post('laporan/brankas/ajukan', [LaporanKasirController::class, 'ajukanLaporanBrankas']);
+    Route::get('/daftar-pegawai', [UserController::class, 'getPegawaiSGI']);
+    Route::get('penggajian/rekap/{tahun}', [PenggajianController::class, 'rekapTahunan']);
+    Route::apiResource('penggajian', PenggajianController::class);
+    Route::apiResource('operasional', OperasionalController::class);
+    Route::get('/cashflow', [CashFlowController::class, 'index']);
 
 });
 
@@ -332,17 +371,20 @@ Route::middleware(['auth:api', 'role:checker'])->group(function () {
     Route::patch('checker/perpanjangan-tempo/{id}/bayar', [PerpanjanganTempoController::class, 'bayarPerpanjangan']);
 
     // Approvals
-    Route::get('checker/approvals', [ApprovalController::class, 'getAll']);
-    Route::get('checker/approvals/checker/approved', [ApprovalController::class, 'getCheckerApproved']); 
-    Route::get('checker/approvals/checker/rejected', [ApprovalController::class, 'getCheckerRejected']);
-    Route::get('checker/approvals/hm/approved', [ApprovalController::class, 'getHmApproved']);
-    Route::get('checker/approvals/hm/rejected', [ApprovalController::class, 'getHmRejected']);
-    Route::get('checker/approvals/selesai', [ApprovalController::class, 'getFinished']);
-
-    // Update status
-    Route::post('checker/approvals/{detailGadaiId}', [ApprovalController::class, 'updateStatus']);
-    Route::post('checker/approvals/{detailGadaiId}/update-detail', [ApprovalController::class, 'updateApprovalDetailChecker']);
+   Route::get('checker/approvals', [ApprovalController::class, 'getAll']);
+    Route::get('checker/approvals/stats/count', [ApprovalController::class, 'getApprovalStats']);
+    
+    // Detail & Action (Update data barang & Update Status Approve/Reject)
     Route::get('checker/approvals/{detailGadaiId}/full-detail', [ApprovalController::class, 'getApprovalDetail']);
+    Route::post('checker/approvals/{detailGadaiId}', [ApprovalController::class, 'updateStatus']);
+    Route::post('checker/approvals/{detailGadaiId}/update-detail', [ApprovalController::class, 'updateApprovalDetail']);
+
+    // Riwayat / History
+    Route::get('checker/approvals/history/checker-approved', [ApprovalController::class, 'getCheckerApproved']);
+    Route::get('checker/approvals/history/checker-rejected', [ApprovalController::class, 'getCheckerRejected']);
+    Route::get('checker/approvals/history/hm-approved', [ApprovalController::class, 'getHmApproved']);
+    Route::get('checker/approvals/history/hm-rejected', [ApprovalController::class, 'getHmRejected']);
+    Route::get('checker/approvals/history/finished', [ApprovalController::class, 'getFinished']);
     Route::get('checker/approvals/finished/filter', [ApprovalFilterController::class, 'filterByMonthYear']);
     Route::get('checker/pelelangan/history', [PelelanganController::class, 'history']);
     Route::post('checker/pelelangan/daftarkan', [PelelanganController::class, 'daftarkanLelang']);
@@ -358,8 +400,8 @@ Route::middleware(['auth:api', 'role:checker'])->group(function () {
     Route::get('checker/brankas', [BrankasController::class, 'index']);
     // Route::get('checker/brankas/riwayat', [BrankasController::class, 'riwayat']);
     // Route::post('checker/brankas/transaksi', [BrankasController::class, 'store']);
-    Route::get('checker/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
-    Route::get('checker/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('checker/brankasDashboard', [DashboardController::class, 'getFullDashboard']);
+    // Route::get('checker/dashboard/brankas-chart', [DashboardController::class, 'brankasYearlyChart']);
     Route::get('checker/harian/cetak', [LaporanHarianCheckerController::class, 'cetakLaporanHarian']);
     Route::get('checker/harian/cetak-serah-terima', [LaporanHarianCheckerController::class, 'cetakLaporanSerahTerima']);
     Route::get('checker/cetak-perpanjangan', [LaporanHarianCheckerController::class, 'cetakLaporanPerpanjangan']);
@@ -398,8 +440,9 @@ Route::middleware(['auth:api', 'role:admin'])->group(function () {
     Route::get('admin/brankas/riwayat', [BrankasController::class, 'riwayat']);
     Route::post('admin/brankas/transaksi', [BrankasController::class, 'store']);
     Route::post('admin/brankas/validasi/{id}', [BrankasController::class, 'validasiSetoran']);
-    Route::get('admin/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
-    Route::get('admin/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    // Route::get('admin/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
+    // Route::get('admin/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('admin/brankasDashboard', [DashboardController::class, 'getFullDashboard']);
     Route::get('admin/laporan-mingguan', [AdminLaporanMingguanController::class, 'cetakLaporanMingguan']);
     Route::get('admin/laporan/struk-awal-mingguan', [AdminLaporanMingguanController::class, 'strukAwalMingguan']);
     Route::get('admin/laporan/rekap-perpanjangan-mingguan', [AdminLaporanMingguanController::class, 'rekapPerpanjanganMingguan']);
@@ -427,8 +470,8 @@ Route::middleware(['auth:api', 'role:kasir'])->group(function () {
     Route::get('kasir/brankas', [BrankasController::class, 'index']);
     Route::get('kasir/brankas/riwayat', [BrankasController::class, 'riwayat']);
     Route::post('kasir/brankas/transaksi', [BrankasController::class, 'store']);
-    Route::get('kasir/dashboard/brankas-stats', [DashboardGadaiController::class, 'brankasDashboard']);
-    Route::get('kasir/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
+    Route::get('kasir/brankasDashboard', [DashboardController::class, 'getFullDashboard']);
+    // Route::get('kasir/dashboard/brankas-chart', [DashboardGadaiController::class, 'brankasYearlyChart']);
     Route::get('kasir/laporan/brankas', [LaporanKasirController::class, 'cetakLaporanBrankasHarian']);
     Route::post('kasir/laporan/brankas/ajukan', [LaporanKasirController::class, 'ajukanLaporanBrankas']);
 });

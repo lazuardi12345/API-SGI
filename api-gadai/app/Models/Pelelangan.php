@@ -11,23 +11,32 @@ class Pelelangan extends Model
 
     protected $table = 'pelelangan';
 
-    protected $fillable = [
+   protected $fillable = [
         'detail_gadai_id',
         'status_lelang',
-        'nominal_diterima',   
-        'keuntungan_lelang',  
-        'metode_pembayaran',  
-        'waktu_bayar',       
-        'bukti_transfer',     
-        'keterangan',
+        'nominal_pokok',
+        'nominal_jasa',
+        'nominal_denda',
+        'nominal_penalty',
+        'total_tagihan',
+        'nominal_diterima',
+        'keuntungan_lelang',
+        'metode_pembayaran',
+        'waktu_bayar',
+        'bukti_transfer',
+        'keterangan'
     ];
 
-  protected $casts = [
-    'waktu_bayar' => 'datetime',
-    'nominal_diterima' => 'double', 
-    'keuntungan_lelang' => 'double',
-];
-
+    protected $casts = [
+        'waktu_bayar' => 'datetime',
+        'nominal_pokok' => 'float',
+        'nominal_jasa' => 'float',
+        'nominal_denda' => 'float',
+        'nominal_penalty' => 'float',
+        'total_tagihan' => 'float',
+        'nominal_diterima' => 'float',
+        'keuntungan_lelang' => 'float',
+    ];
     /**
      * Relasi ke DetailGadai
      */

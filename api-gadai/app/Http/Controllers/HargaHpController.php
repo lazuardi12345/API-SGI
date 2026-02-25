@@ -192,4 +192,41 @@ class HargaHpController extends Controller
         ], 500);
     }
 }
+
+public function getGradeDetailByType($type_hp_id)
+{
+    try {
+        $harga = HargaHp::with(['typeHp.merk', 'grades'])
+            ->where('type_hp_id', $type_hp_id)
+            ->first(); 
+
+        if (!$harga) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data harga atau grade untuk type ini belum disetting',
+                'data' => null
+            ], 404);
+        }
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'type_info' => [
+                    'id' => $harga->typeHp->id,
+                    'nama_type' => $harga->typeHp->nama_type,
+                    'merk' => $harga->typeHp->merk->nama_merk,
+                ],
+                'harga_dasar' => [
+                    'harga_barang' => $harga->harga_barang,
+                    'harga_pasar' => $harga->harga_pasar,
+                ],
+                'grades' => $harga->grades->first() 
+            ]
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal ambil data: ' . $e->getMessage()
+        ], 500);
+    }
+}
 }

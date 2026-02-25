@@ -7,7 +7,7 @@ return [
     | Paths
     |--------------------------------------------------------------------------
     */
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['*', 'sanctum/csrf-cookie'],
 
     /*
     |--------------------------------------------------------------------------
@@ -31,12 +31,13 @@ return [
         'http://ardi.local:3000',
         'http://192.182.6.107:3000',
         'http://192.182.6.107:3001',
+        'http://192.182.6.107:8000',
         'http://localhost:3001',
         'http://localhost:3000',
         'http://192.182.6.69:3101',
-        'https://donations-start-matrix-jet.trycloudflare.com',
-        'https://conclusion-kentucky-massage-dod.trycloudflare.com',
-        'https://alberta-batman-superior-exemption.trycloudflare.com',
+        'https://pushing-tuition-radio-housewives.trycloudflare.com ',
+        'https://developer-spice-photographic-org.trycloudflare.com',
+        'https://jar-measure-causing-hewlett.trycloudflare.com',
         'http://192.182.6.100:3000'
 
     ],
